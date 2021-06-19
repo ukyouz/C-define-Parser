@@ -34,7 +34,7 @@ class Parser():
                 token = token.replace(match.group(0), '')
         return token
         
-    def read_file_lines(self, filepath, func, try_if_else = False):
+    def _read_file_lines(self, filepath, func, try_if_else = False):
         # define_off = 0
         line_break_regex = r'\\\s*'
         line_comment_regex = r'\s*\/\/.+'
@@ -45,7 +45,7 @@ class Parser():
                 # TODO: expand if/elif/else expression
                 multi_lines += re.sub(line_comment_regex, '', line)
                 if re.search(line_break_regex, line):
-                        continue
+                    continue
                 single_line = re.sub(line_break_regex, '', multi_lines)
                 func(single_line)
                 multi_lines = ''
@@ -72,7 +72,7 @@ class Parser():
                 token=token,
                 line=line,
             )
-        self.read_file_lines(filepath, insert_def)
+        self._read_file_lines(filepath, insert_def)
     
     def find_tokens(self, token):
         def fine_token_params(params):
@@ -80,10 +80,7 @@ class Parser():
             brackets = 0
             new_params = ''
             for c in params:
-                if c == '(':
-                    brackets += 1
-                if c == ')':
-                    brackets -=1
+                brackets += (c == '(') * 1 + (c == ')') * -1
                 new_params += c
                 if brackets == 0:
                     break
@@ -117,12 +114,13 @@ class Parser():
     
     # @functools.lru_cache
     def expand_token(self, token):
-        token = self.strip_token(token)
+        expanded_token = self.strip_token(token)
         self.iterate += 1
         if self.iterate > 20:
             print('???')
-        tokens = self.find_tokens(token)
+        tokens = self.find_tokens(expanded_token)
         if len(tokens):
+            word_boundary = lambda word: r'\b' + word + r'\b'
             for _token in tokens:
                 name = _token.name
                 params = self.strip_token(_token.params)
@@ -136,21 +134,21 @@ class Parser():
                         new_token = self.definitions[name].token
                         # Expand the token
                         for old_p, new_p in zip(self.definitions[name].params, new_params):
-                            new_token = re.sub(r'\b'+old_p+r'\b', new_p, new_token)
-                        token = token.replace(_token.token, new_token)
+                            new_token = re.sub(word_boundary(old_p), new_p, new_token)
+                        expanded_token = expanded_token.replace(_token.token, new_token)
                         # Take care the remaining tokens
-                        token = self.expand_token(token)
+                        expanded_token = self.expand_token(expanded_token)
                     else:
                         print(f'token \'{name}\' is not defined!')
                         raise KeyError
-                elif name is not token:
+                elif name is not expanded_token:
                     params = self.expand_token(_token.token)
-                    token = re.sub(r'\b'+_token.token+r'\b', params, token)
-                    # token = token.replace(match.group(0), self.expand_token(match.group(0)))
-        if token in self.definitions:
-            token = self.expand_token(self.definitions[token].token)
+                    expanded_token = re.sub(word_boundary(_token.token), params, expanded_token)
+                    # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
+        if expanded_token in self.definitions:
+            expanded_token = self.expand_token(self.definitions[token].token)
 
-        return token
+        return expanded_token
 
     def get_expand_defines(self, filepath):
         defines = []
@@ -179,7 +177,7 @@ class Parser():
                 token=token,
                 line=line,
             ))
-        self.read_file_lines(filepath, expand_define)
+        self._read_file_lines(filepath, expand_define)
         return defines
     
     def get_expand_define(self, macro_name):
