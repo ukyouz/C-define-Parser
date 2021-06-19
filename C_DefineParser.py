@@ -27,27 +27,28 @@ class Parser():
         if token == None:
             return None
         token = token.strip()
-        comments = list(re.finditer(r'\/\*[\w\d_, +*!=<>&|\-\(\)]+\*\/', token))
+        inline_comment_regex = r'\/\*[\w\d_, +*!=<>&|\-\(\)]+\*\/'
+        comments = list(re.finditer(inline_comment_regex, token))
         if len(comments):
             for match in comments:
                 token = token.replace(match.group(0), '')
         return token
         
-    def read_file_lines(self, filepath, func):
-        define_off = 0
+    def read_file_lines(self, filepath, func, try_if_else = False):
+        # define_off = 0
+        line_break_regex = r'\\\s*'
+        line_comment_regex = r'\s*\/\/.+'
         with open(filepath, 'r') as fs:
+            multi_lines = ''
             for line in fs.readlines():
-                if line.startswith('#if'):
-                    if line.startswith('#if 0'):
-                        define_off += 1;
+                line = line.strip()
+                # TODO: expand if/elif/else expression
+                multi_lines += re.sub(line_comment_regex, '', line)
+                if re.search(line_break_regex, line):
                         continue
-                    if define_off:
-                        define_off += 1
-                if line.startswith('#endif') and define_off:
-                    define_off -= 1
-                if define_off == 0:
-                    line = re.sub('\s*\/\/.+', '', line)
-                    func(line)
+                single_line = re.sub(line_break_regex, '', multi_lines)
+                func(single_line)
+                multi_lines = ''
     
     '''
     TODO: read_folder_h method,
