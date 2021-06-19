@@ -4,24 +4,27 @@ import pathlib
 import functools
 from collections import namedtuple
 
+DEFINE = namedtuple('DEFINE', ('name', 'params', 'token', 'line'), defaults=('', [], '', ''))
+TOKEN = namedtuple('DEFINE', ('name', 'params', 'line'), defaults=('', '', ''))
+
+REGEX_TOKEN = r'(?P<NAME>[A-Z][A-Z0-9_]+)'
+REGEX_DEFINE = r'#define\s+(?P<NAME>[A-Z0-9_]+)(?:\((?P<PARAMS>[\w, ]+)\))*\s+(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)'
+
 class Parser():
-    Define = namedtuple('Define', 'name, params, token, line')
-    Token = namedtuple('Define', 'name, params, token')
-    token_regex = r'(?P<NAME>[A-Z][A-Z0-9_]+)'
-    define_regex = r'#define\s+(?P<NAME>[A-Z0-9_]+)(?:\((?P<PARAMS>[\w, ]+)\))*\s+(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)'
-    definitions = {} # array of Define
+    defs = {} # dict of DEFINE
     debug = True
     iterate = 0
 
     def __init__(self):
         pass
     
-    def insert_token(self, name, token):
-        self.definitions[name] = self.Define(
+    def insert_token(self, name, params=None, token=None):
+        new_params = params or []
+        new_token = token or ''
+        self.defs[name] = DEFINE(
             name=name,
-            params=[],
-            token=token,
-            line='',
+            params=new_params,
+            token=new_token,
         )
     
     def strip_token(self, token):
@@ -34,6 +37,12 @@ class Parser():
             for match in comments:
                 token = token.replace(match.group(0), '')
         return token
+    
+    def _try_eval_num(self, token):
+        try:
+            return eval(token)
+        except:
+            return None
         
     def _read_file_lines(self, filepath, func, try_if_else = False):
         # define_off = 0
@@ -51,28 +60,38 @@ class Parser():
                 func(single_line)
                 multi_lines = ''
     
+    def _get_define(self, line):
+        match = re.match(REGEX_DEFINE, line)
+        if match == None:
+            return
+
+        name = match.group('NAME')
+        params = match.group('PARAMS')
+        param_list = [p.strip() for p in params.split(',')] if params else []
+        token = self.strip_token(match.group('TOKEN'))
+
+        return DEFINE(
+            name=name,
+            params=param_list,
+            token=token,
+            line=line,
+        )
+    
     '''
     TODO: read_folder_h method,
     parse the included files first with self.read_h then try expand #if expression with self.expand_token
     '''
     
     def read_h(self, filepath):
+
         def insert_def(line):
-            match = re.match(self.define_regex, line)
-            if match == None:
+            define = self._get_define(line)
+            if define == None:
                 return
-            name = match.group('NAME')
-            params = match.group('PARAMS')
-            param_list = [p.strip() for p in params.split(',')] if params else []
-            token = self.strip_token(match.group('TOKEN'))
-            # if len(param_list):
+            # if len(define.params):
             #     return
-            self.definitions[name] = self.Define(
-                name=name,
-                params=param_list,
-                token=token,
-                line=line,
-            )
+            self.defs[define.name] = define
+
         self._read_file_lines(filepath, insert_def)
     
     def find_tokens(self, token):
@@ -86,29 +105,22 @@ class Parser():
                 if brackets == 0:
                     break
             return new_params
-        def is_valid_num(token):
-            try:
-                eval(token)
-                return True
-            except:
-                return False
-        if is_valid_num(token):
+        if self._try_eval_num(token):
             return []
-        tokens = list(re.finditer(self.token_regex, token))
+        tokens = list(re.finditer(REGEX_TOKEN, token))
         params = ''
         if len(tokens):
             ret_tokens = []
             for match in tokens:
                 _token = match.group('NAME')
-                if _token in self.definitions:
-                    params_required = self.definitions[_token].params
+                if _token in self.defs:
+                    params_required = self.defs[_token].params
                     end_pos = match.end()
                     if len(params_required):
                         params = fine_token_params(token[end_pos:])
                 else:
-                    print(f'token \'{_token}\' is not defined!')
-                    raise KeyError
-                ret_tokens.append(self.Token(name=_token, params=params, token=_token+params))
+                    raise KeyError(f'token \'{_token}\' is not defined!')
+                ret_tokens.append(TOKEN(name=_token, params=params, line=_token+params))
             return ret_tokens
         else:
            return []
@@ -119,6 +131,7 @@ class Parser():
         self.iterate += 1
         if self.iterate > 20 and self.debug:
             print(f'{" "*((self.iterate-20)//5)}{self.iterate:3} {token}')
+
         tokens = self.find_tokens(expanded_token)
         if len(tokens):
             word_boundary = lambda word: r'\b' + word + r'\b'
@@ -128,68 +141,62 @@ class Parser():
                 if len(params):
                     # Expand all the parameters first
                     for p_tok in self.find_tokens(params):
-                        params = params.replace(p_tok.token, self.expand_token(p_tok.token))
+                        params = params.replace(p_tok.line, self.expand_token(p_tok.line))
                         tokens.remove(next((t for t in tokens if p_tok.name == t.name)))
                     new_params = params[1:-1].split(',')
-                    if name in self.definitions:
-                        new_token = self.definitions[name].token
+                    if name in self.defs:
+                        new_token = self.defs[name].token
                         # Expand the token
-                        for old_p, new_p in zip(self.definitions[name].params, new_params):
+                        for old_p, new_p in zip(self.defs[name].params, new_params):
                             new_token = re.sub(word_boundary(old_p), new_p, new_token)
-                        expanded_token = expanded_token.replace(_token.token, new_token)
+                        expanded_token = expanded_token.replace(_token.line, new_token)
                         # Take care the remaining tokens
                         expanded_token = self.expand_token(expanded_token)
                     else:
-                        print(f'token \'{name}\' is not defined!')
-                        raise KeyError
+                        raise KeyError(f'token \'{name}\' is not defined!')
                 elif name is not expanded_token:
-                    params = self.expand_token(_token.token)
-                    expanded_token = re.sub(word_boundary(_token.token), params, expanded_token)
+                    params = self.expand_token(_token.line)
+                    expanded_token = re.sub(word_boundary(_token.line), params, expanded_token)
                     # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
-        if expanded_token in self.definitions:
-            expanded_token = self.expand_token(self.definitions[token].token)
+
+        if expanded_token in self.defs:
+            expanded_token = self.expand_token(self.defs[token].token)
 
         return expanded_token
 
     def get_expand_defines(self, filepath):
         defines = []
+
         def expand_define(line):
             # TODO: process include files first
-            match = re.match(self.define_regex, line)
-            if match == None:
+            define = self._get_define(line)
+            if define == None:
                 return
-            params = match.group('PARAMS')
-            param_list = [p.strip() for p in params.split(',')] if params else []
-            if len(param_list):
-                return
-            name = match.group('NAME')
             self.iterate = 0
-            token = self.strip_token(match.group('TOKEN'))
-            token = self.expand_token(token)
-            if name in self.definitions:
-                try:
-                    token = str(eval(token))
-                except:
-                    pass
-                self.definitions[name] = self.definitions[name]._replace(token=token)
-            defines.append(self.Define(
-                name=name,
-                params=param_list,
+            token = self.expand_token(define.token)
+            if define.name in self.defs:
+                token_val = self._try_eval_num(token)
+                if token_val:
+                    self.defs[define.name] = self.defs[define.name]._replace(token=str(token_val))
+            defines.append(DEFINE(
+                name=define.name,
+                params=define.params,
                 token=token,
                 line=line,
             ))
+
         self._read_file_lines(filepath, expand_define)
         return defines
     
     def get_expand_define(self, macro_name):
-        if macro_name not in self.definitions:
+        if macro_name not in self.defs:
             return ''
         
-        define = self.definitions[macro_name]
+        define = self.defs[macro_name]
         token = define.token
         expanded_token = self.expand_token(token)
 
-        return self.Define(
+        return DEFINE(
             name=macro_name,
             params=define,
             token=expanded_token,
