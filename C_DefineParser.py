@@ -10,6 +10,7 @@ class Parser():
     token_regex = r'(?P<NAME>[A-Z][A-Z0-9_]+)'
     define_regex = r'#define\s+(?P<NAME>[A-Z0-9_]+)(?:\((?P<PARAMS>[\w, ]+)\))*\s+(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)'
     definitions = {} # array of Define
+    debug = True
     iterate = 0
 
     def __init__(self):
@@ -116,8 +117,8 @@ class Parser():
     def expand_token(self, token):
         expanded_token = self.strip_token(token)
         self.iterate += 1
-        if self.iterate > 20:
-            print('???')
+        if self.iterate > 20 and self.debug:
+            print(f'{" "*((self.iterate-20)//5)}{self.iterate:3} {token}')
         tokens = self.find_tokens(expanded_token)
         if len(tokens):
             word_boundary = lambda word: r'\b' + word + r'\b'
