@@ -4,6 +4,16 @@
 #include "base/conf.h"
 #include "base/types.h"
 
+#if 0
+#define IF_0_BLOCK      (0)
+#else
+#define IF_0_ELSE_BLOCK (1)
+#endif
+
+#define MULTI_LINE_DEF       \
+                        (1)  \
+                        +    \
+                        (2)
 
 /*
  * Sample NVME Model
