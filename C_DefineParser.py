@@ -181,6 +181,21 @@ class Parser():
             ))
         self.read_file_lines(filepath, expand_define)
         return defines
+    
+    def get_expand_define(self, macro_name):
+        if macro_name not in self.definitions:
+            return ''
+        
+        define = self.definitions[macro_name]
+        token = define.token
+        expanded_token = self.expand_token(token)
+
+        return self.Define(
+            name=macro_name,
+            params=define,
+            token=expanded_token,
+            line=define.line
+        )
 
 if __name__ == '__main__':
     p = Parser()
