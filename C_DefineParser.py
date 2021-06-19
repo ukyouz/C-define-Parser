@@ -130,6 +130,7 @@ class Parser():
                     # Expand all the parameters first
                     for p_tok in self.find_tokens(params):
                         params = params.replace(p_tok.token, self.expand_token(p_tok.token))
+                        tokens.remove(next((t for t in tokens if p_tok.name == t.name)))
                     new_params = params[1:-1].split(',')
                     if name in self.definitions:
                         new_token = self.definitions[name].token
@@ -147,7 +148,7 @@ class Parser():
                     token = re.sub(r'\b'+_token.token+r'\b', params, token)
                     # token = token.replace(match.group(0), self.expand_token(match.group(0)))
         if token in self.definitions:
-            token = self.definitions[token].token
+            token = self.expand_token(self.definitions[token].token)
 
         return token
 
