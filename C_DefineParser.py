@@ -7,8 +7,9 @@ from collections import namedtuple
 DEFINE = namedtuple('DEFINE', ('name', 'params', 'token', 'line'), defaults=('', [], '', ''))
 TOKEN = namedtuple('DEFINE', ('name', 'params', 'line'), defaults=('', '', ''))
 
-REGEX_TOKEN = r'(?P<NAME>[A-Z][A-Z0-9_]+)'
-REGEX_DEFINE = r'#define\s+(?P<NAME>[A-Z0-9_]+)(?:\((?P<PARAMS>[\w, ]+)\))*\s+(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)'
+REGEX_TOKEN = r'(?P<NAME>[A-Z_][A-Z0-9_]+)'
+REGEX_DEFINE = r'#define\s+'+REGEX_TOKEN+r'(?:\((?P<PARAMS>[\w, ]+)\))*\s*(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)*'
+BIT = lambda n : 1 << n
 
 class Parser():
     defs = {} # dict of DEFINE
@@ -18,7 +19,7 @@ class Parser():
     def __init__(self):
         pass
     
-    def insert_token(self, name, params=None, token=None):
+    def insert_define(self, name, params=None, token=None):
         new_params = params or []
         new_token = token or ''
         self.defs[name] = DEFINE(
@@ -209,6 +210,6 @@ if __name__ == '__main__':
     for inc_file in pathlib.Path(inc_path).glob('**/*.h'):
         p.read_h(inc_file)
 
-    p.insert_token(name='ENV', token='1')
+    p.insert_define(name='ENV', token='1')
     defines = p.get_expand_defines('./samples/address_map.h')
     print(defines)
