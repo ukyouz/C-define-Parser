@@ -37,7 +37,7 @@
 
 #define NVME_IO_QUEUE_SIZE          (NVME_CMD_SIZE)
 #define NVME_IO_QUEUE_DEPTH         (65536 /* should be equal to hardware limitation */)
-#define NVME_IO_QUEUE0_BASE         (NVME_ADM_QUEUE_BASE + NVME_IO_QUEUE_SIZE * NVME_IO_QUEUE_DEPTH)
+#define NVME_IO_QUEUE0_BASE         (NVME_ADM_QUEUE_BASE + NVME_ADM_QUEUE_SIZE * NVME_ADM_QUEUE_DEPTH)
 #define NVME_IO_QUEUE1_BASE         (NVME_IO_QUEUE0_BASE + NVME_IO_QUEUE_SIZE * NVME_IO_QUEUE_DEPTH)
 #define NVME_IO_QUEUE2_BASE         (NVME_IO_QUEUE1_BASE + NVME_IO_QUEUE_SIZE * NVME_IO_QUEUE_DEPTH)
 #define NVME_IO_QUEUE3_BASE         (NVME_IO_QUEUE2_BASE + NVME_IO_QUEUE_SIZE * NVME_IO_QUEUE_DEPTH)
@@ -63,7 +63,7 @@
 #if (ENV == ENV_DEVELOP)
 
 #define BUFFER_1_BASE                (ALIGN_2N(BUFFER_0_BASE + BUFFER_0_SIZE, BUFFER_ALIGN_SHIFT))
-#define BUFFER_0_SIZE                (0x1000)
+#define BUFFER_1_SIZE                (0x1000)
 
 #endif 
 
@@ -77,7 +77,7 @@
 
 #if (ENV == ENV_TEST)
 
-#define FIFO_2_BASE                  (ALIGN_2N(FIFO_1_BASE + FIFO_1_UNIT * FIFO_1_DEPTH, ALIGN_2N(BUFFER_ALIGN_SHIFT)))
+#define FIFO_2_BASE                  (ALIGN_2N(FIFO_1_BASE + FIFO_1_UNIT * FIFO_1_DEPTH, ALIGN_2N(BUFFER_ALIGN_SHIFT, 2)))
 #define FIFO_2_UNIT                  (16)
 #define FIFO_2_DEPTH                 (8)
 
@@ -85,7 +85,7 @@
 
 #else
 
-#define BUFFER_END                   (FIFO_1_BASE + FIFO_1_UNIT * FIFO_2_DEPTH)
+#define BUFFER_END                   (FIFO_1_BASE + FIFO_1_UNIT * FIFO_1_DEPTH)
 
 #endif
 
