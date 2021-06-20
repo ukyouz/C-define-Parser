@@ -9,6 +9,7 @@ TOKEN = namedtuple('DEFINE', ('name', 'params', 'line'), defaults=('', '', ''))
 
 REGEX_TOKEN = r'(?P<NAME>[A-Z_][A-Z0-9_]+)'
 REGEX_DEFINE = r'#define\s+'+REGEX_TOKEN+r'(?:\((?P<PARAMS>[\w, ]+)\))*\s*(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)*'
+REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
 BIT = lambda n : 1 << n
 
 class Parser():
@@ -28,6 +29,12 @@ class Parser():
             token=new_token,
         )
     
+    def remove_define(self, name):
+        if name not in self.defs:
+            raise KeyError(f'token \'{name}\' is not defined!')
+
+        del self.defs[name]
+    
     def strip_token(self, token):
         if token == None:
             return None
@@ -45,7 +52,7 @@ class Parser():
         except:
             return None
         
-    def _read_file_lines(self, filepath, func, try_if_else = False):
+    def _read_file_lines(self, filepath, func, try_if_else=False, ignore_header_guard=False):
         regex_line_break = r'\\\s*'
         regex_line_comment = r'\s*\/\/.+'
 
@@ -64,10 +71,14 @@ class Parser():
                     match_endif = re.match(r'#endif.*', line)
                     if match_if:
                         if_depth += 1
-                        if_token = self.expand_token(match_if.group('TOKEN'), raise_key_error=False)
+                        token = match_if.group('TOKEN')
+                        if_token = ('0' # header guard always uses #ifndef __*
+                            if ignore_header_guard and token.startswith('__')
+                            else self.expand_token(token, try_if_else, raise_key_error=False)
+                        )
                         if_true_bmp |= BIT(if_depth) * (eval(if_token) ^ (match_if.group('NOT') != None))
                     elif match_elif:
-                        if_token = self.expand_token(match_elif.group('TOKEN'), raise_key_error=False)
+                        if_token = self.expand_token(match_elif.group('TOKEN'), try_if_else, raise_key_error=False)
                         if_true_bmp |= (BIT(if_depth) * (eval(if_token)))
                         if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
                     elif match_else:
@@ -104,11 +115,34 @@ class Parser():
             token=token,
             line=line,
         )
-    
-    '''
-    TODO: read_folder_h method,
-    parse the included files first with self.read_h then try expand #if expression with self.expand_token
-    '''
+
+    def read_folder_h(self, directory, try_if_else=True):
+        header_files = list(pathlib.Path(directory).glob('**/*.h'))
+        pre_defined_keys = self.defs.keys()
+
+        def read_header(filepath):
+            if filepath == None:
+                return
+
+            def insert_def(line):
+                match_include = re.match(REGEX_INCLUDE, line)
+                if match_include != None:
+                    # parse included file first
+                    path = match_include.group('PATH')
+                    included_file = next((h for h in header_files if path in str(h)), None)
+                    read_header(included_file)
+                define = self._get_define(line)
+                if define == None or define.name in pre_defined_keys:
+                    return
+                self.defs[define.name] = define
+
+            self._read_file_lines(filepath, insert_def, try_if_else)
+
+            print('Read File:', filepath)
+            header_files.remove(filepath)
+ 
+        for header_file in header_files:
+            read_header(header_file)
     
     def read_h(self, filepath, try_if_else=False):
 
@@ -122,7 +156,7 @@ class Parser():
 
         self._read_file_lines(filepath, insert_def, try_if_else)
     
-    def find_tokens(self, token, raise_key_error=True):
+    def find_tokens(self, token):
         def fine_token_params(params):
             # (() ())
             brackets = 0
@@ -146,21 +180,19 @@ class Parser():
                     end_pos = match.end()
                     if len(params_required):
                         params = fine_token_params(token[end_pos:])
-                elif raise_key_error:
-                    raise KeyError(f'token \'{_token}\' is not defined!')
                 ret_tokens.append(TOKEN(name=_token, params=params, line=_token+params))
             return ret_tokens
         else:
            return []
     
     # @functools.lru_cache
-    def expand_token(self, token, raise_key_error=True):
+    def expand_token(self, token, try_if_else=False, raise_key_error=True):
         expanded_token = self.strip_token(token)
         self.iterate += 1
         if self.iterate > 20 and self.debug:
             print(f'{" "*((self.iterate-20)//5)}{self.iterate:3} {token}')
 
-        tokens = self.find_tokens(expanded_token, raise_key_error)
+        tokens = self.find_tokens(expanded_token)
         if len(tokens):
             word_boundary = lambda word: r'\b' + word + r'\b'
             for _token in tokens:
@@ -168,10 +200,10 @@ class Parser():
                 params = self.strip_token(_token.params)
                 if len(params):
                     # Expand all the parameters first
-                    for p_tok in self.find_tokens(params, raise_key_error):
+                    for p_tok in self.find_tokens(params):
                         params = params.replace(
                             p_tok.line,
-                            self.expand_token(p_tok.line, raise_key_error)
+                            self.expand_token(p_tok.line, try_if_else, raise_key_error)
                         )
                         tokens.remove(next((t for t in tokens if p_tok.name == t.name)))
                     new_params = params[1:-1].split(',')
@@ -182,33 +214,34 @@ class Parser():
                             new_token = re.sub(word_boundary(old_p), new_p, new_token)
                         expanded_token = expanded_token.replace(_token.line, new_token)
                         # Take care the remaining tokens
-                        expanded_token = self.expand_token(expanded_token, raise_key_error)
+                        expanded_token = self.expand_token(expanded_token, try_if_else, raise_key_error)
                     elif raise_key_error:
                         raise KeyError(f'token \'{name}\' is not defined!')
                     # else:
                     #     expanded_token = expanded_token.replace(_token.line, '(0)')
                 elif name is not expanded_token:
-                    params = self.expand_token(_token.line, raise_key_error)
+                    params = self.expand_token(_token.line, try_if_else, raise_key_error)
                     expanded_token = re.sub(word_boundary(_token.line), params, expanded_token)
                     # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
                 elif name not in self.defs:
                     expanded_token = expanded_token.replace(_token.line, '(0)')
 
         if expanded_token in self.defs:
-            expanded_token = self.expand_token(self.defs[token].token, raise_key_error)
+            expanded_token = self.expand_token(self.defs[token].token, try_if_else, raise_key_error)
 
         return expanded_token
 
-    def get_expand_defines(self, filepath, try_if_else=False):
+    def get_expand_defines(self, filepath, try_if_else=False, ignore_header_guard=True):
         defines = []
 
         def expand_define(line):
-            # TODO: process include files first
             define = self._get_define(line)
             if define == None:
                 return
             self.iterate = 0
-            token = self.expand_token(define.token)
+            if define.name == 'FIFO_2_BASE':
+                print(1)
+            token = self.expand_token(define.token, try_if_else)
             if define.name in self.defs:
                 token_val = self._try_eval_num(token)
                 if token_val:
@@ -220,16 +253,16 @@ class Parser():
                 line=line,
             ))
 
-        self._read_file_lines(filepath, expand_define, try_if_else)
+        self._read_file_lines(filepath, expand_define, try_if_else, ignore_header_guard)
         return defines
     
-    def get_expand_define(self, macro_name):
+    def get_expand_define(self, macro_name, try_if_else=False):
         if macro_name not in self.defs:
-            return ''
+            return None
         
         define = self.defs[macro_name]
         token = define.token
-        expanded_token = self.expand_token(token)
+        expanded_token = self.expand_token(token, try_if_else)
 
         return DEFINE(
             name=macro_name,
@@ -240,10 +273,10 @@ class Parser():
 
 if __name__ == '__main__':
     p = Parser()
-    inc_path = './samples'
-    for inc_file in pathlib.Path(inc_path).glob('**/*.h'):
-        p.read_h(inc_file)
+    p.read_folder_h('./samples')
 
-    p.insert_define(name='ENV', token='1')
-    defines = p.get_expand_defines('./samples/address_map.h')
-    print(defines)
+    defines = p.get_expand_defines('./samples/address_map.h', try_if_else=True)
+    for define in defines:
+        val = p._try_eval_num(define.token)
+        token = hex(val) if val and val > 0x08000 else define.token
+        print(f'{define.name:25} {token}')
