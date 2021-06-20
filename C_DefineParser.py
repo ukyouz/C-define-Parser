@@ -7,17 +7,17 @@ from collections import namedtuple
 DEFINE = namedtuple('DEFINE', ('name', 'params', 'token', 'line'), defaults=('', [], '', ''))
 TOKEN = namedtuple('DEFINE', ('name', 'params', 'line'), defaults=('', '', ''))
 
-REGEX_TOKEN = r'(?P<NAME>[A-Z_][A-Z0-9_]+)'
+REGEX_TOKEN = r'\b(?P<NAME>[A-Z_][A-Z0-9_]+)\b'
 REGEX_DEFINE = r'#define\s+'+REGEX_TOKEN+r'(?:\((?P<PARAMS>[\w, ]+)\))*\s*(?P<TOKEN>[\w\d_, +*!=<>&|\/\-\(\)]+)*'
 REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
 BIT = lambda n : 1 << n
 
 class Parser():
-    defs = {} # dict of DEFINE
     debug = True
     iterate = 0
 
     def __init__(self):
+        self.defs = {} # dict of DEFINE
         pass
     
     def insert_define(self, name, params=None, token=None):
