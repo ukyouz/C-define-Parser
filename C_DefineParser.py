@@ -246,6 +246,11 @@ class Parser():
 
         if expanded_token in self.defs:
             expanded_token = self.expand_token(self.defs[token].token, try_if_else, raise_key_error)
+            
+            # try to eval the value, to reduce the bracket count
+            token_val = self._try_eval_num(expanded_token)
+            if token_val:
+                expanded_token = str(token_val)
 
         return expanded_token
 
@@ -257,8 +262,6 @@ class Parser():
             if define == None:
                 return
             self.iterate = 0
-            if define.name == 'FIFO_2_BASE':
-                print(1)
             token = self.expand_token(define.token, try_if_else)
             if define.name in self.defs:
                 token_val = self._try_eval_num(token)
