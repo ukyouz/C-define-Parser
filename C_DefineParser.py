@@ -39,7 +39,7 @@ class Parser():
         if token == None:
             return None
         token = token.strip()
-        inline_comment_regex = r'\/\*[\w\d_, +*!=<>&|\-\(\)]+\*\/'
+        inline_comment_regex = r'\/\*[^\/]+\*\/'
         comments = list(re.finditer(inline_comment_regex, token))
         if len(comments):
             for match in comments:
@@ -62,10 +62,11 @@ class Parser():
         with open(filepath, 'r') as fs:
             multi_lines = ''
             for line in fs.readlines():
-                line = re.sub(regex_line_comment, '', line.strip())
+                # TODO: multilines comment with /* */
+                line = re.sub(regex_line_comment, '', self.strip_token(line))
 
                 if try_if_else:
-                    match_if = re.match(r'#if((?P<NOT>n*)def)*\s+(?P<TOKEN>.+)', line)
+                    match_if = re.match(r'#if((?P<NOT>n*)def)*\s*(?P<TOKEN>.+)', line)
                     match_elif = re.match(r'#elif\s+(?P<TOKEN>.+)', line)
                     match_else = re.match(r'#else.*', line)
                     match_endif = re.match(r'#endif.*', line)
@@ -76,10 +77,12 @@ class Parser():
                             if ignore_header_guard and token.startswith('__')
                             else self.expand_token(token, try_if_else, raise_key_error=False)
                         )
-                        if_true_bmp |= BIT(if_depth) * (eval(if_token) ^ (match_if.group('NOT') != None))
+                        if_token_val = self._try_eval_num(if_token) or 0
+                        if_true_bmp |= BIT(if_depth) * (if_token_val ^ (match_if.group('NOT') == 'n'))
                     elif match_elif:
                         if_token = self.expand_token(match_elif.group('TOKEN'), try_if_else, raise_key_error=False)
-                        if_true_bmp |= (BIT(if_depth) * (eval(if_token)))
+                        if_token_val = self._try_eval_num(if_token) or 0
+                        if_true_bmp |= (BIT(if_depth) * if_token_val)
                         if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
                     elif match_else:
                         if_true_bmp ^= BIT(if_depth) # toggle state
@@ -118,18 +121,30 @@ class Parser():
 
     def read_folder_h(self, directory, try_if_else=True):
         header_files = list(pathlib.Path(directory).glob('**/*.h'))
+        header_done = set()
         pre_defined_keys = self.defs.keys()
 
-        def read_header(filepath):
-            if filepath == None:
-                return
+        def get_included_file(path):
+            included_files = [str(h)
+                for h in header_files
+                if path in str(h) and
+                os.path.basename(path) == os.path.basename(h)
+            ]
+            if len(included_files) > 1:
+                raise NameError(', '.join(included_files))
+            
+            return included_files[0] if len(included_files) else None
 
+        def read_header(filepath):
+            if filepath == None or filepath in header_done:
+                return
+                
             def insert_def(line):
                 match_include = re.match(REGEX_INCLUDE, line)
                 if match_include != None:
                     # parse included file first
                     path = match_include.group('PATH')
-                    included_file = next((h for h in header_files if path in str(h)), None)
+                    included_file = get_included_file(path)
                     read_header(included_file)
                 define = self._get_define(line)
                 if define == None or define.name in pre_defined_keys:
@@ -138,8 +153,9 @@ class Parser():
 
             self._read_file_lines(filepath, insert_def, try_if_else)
 
-            print('Read File:', filepath)
-            header_files.remove(filepath)
+            if filepath in header_files:
+                print('Read File:', filepath)
+                header_done.add(filepath)
  
         for header_file in header_files:
             read_header(header_file)
@@ -224,6 +240,8 @@ class Parser():
                     expanded_token = re.sub(word_boundary(_token.line), params, expanded_token)
                     # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
                 elif name not in self.defs:
+                    if raise_key_error:
+                        raise KeyError(f'token \'{name}\' is not defined!')
                     expanded_token = expanded_token.replace(_token.line, '(0)')
 
         if expanded_token in self.defs:
