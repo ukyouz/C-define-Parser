@@ -13,7 +13,7 @@ REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
 BIT = lambda n : 1 << n
 
 class Parser():
-    debug = True
+    debug = False
     iterate = 0
 
     def __init__(self):
@@ -67,7 +67,7 @@ class Parser():
 
                 if try_if_else:
                     match_if = re.match(r'#if((?P<NOT>n*)def)*\s*(?P<TOKEN>.+)', line)
-                    match_elif = re.match(r'#elif\s+(?P<TOKEN>.+)', line)
+                    match_elif = re.match(r'#elif\s*(?P<TOKEN>.+)', line)
                     match_else = re.match(r'#else.*', line)
                     match_endif = re.match(r'#endif.*', line)
                     if match_if:

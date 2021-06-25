@@ -102,7 +102,7 @@ class TestENV_PUBLIC_Tokens(unittest.TestCase):
 	def setUpClass(cls):
 		cls.parser = Parser()
 		inc_path = './samples'
-		cls.parser.insert_define('ENV', token='ENV_DEVELOP')
+		cls.parser.insert_define('ENV', token='ENV_TEST')
 		cls.parser.read_folder_h(inc_path)
 		return cls
 	
@@ -134,15 +134,15 @@ class TestENV_PUBLIC_Tokens(unittest.TestCase):
     
 	def test_complex_token(self):
 		self._assert_token('(ALIGN_2N(BUFFER_BASE, BUFFER_ALIGN_SHIFT))', 0x4000000)
-		self._assert_token('NVME_IO_QUEUEN_BASE(8)', 0x2210000)
+		self._assert_token('NVME_IO_QUEUEN_BASE(8)', 0x2B10000)
 
 	def test_complex_define(self):
 		self._assert_define('BUFFER_0_BASE', 0x4000000)
-		self._assert_define('NVME_IO_QUEUE0_BASE', 0x210000)
+		self._assert_define('NVME_IO_QUEUE0_BASE', 0xB10000)
 	
 	def test_existence_define(self):
 		define = self.parser.get_expand_define('BUFFER_1_BASE', try_if_else=True)
-		self.assertIsNotNone(define)
+		self.assertIsNone(define)
 
 if __name__ == '__main__':
     unittest.main()
