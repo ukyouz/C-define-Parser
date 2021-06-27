@@ -1,7 +1,7 @@
 import os
 import re
 import pathlib
-import functools
+# import functools
 from collections import namedtuple
 
 DEFINE = namedtuple('DEFINE', ('name', 'params', 'token', 'line'), defaults=('', [], '', ''))
