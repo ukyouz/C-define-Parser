@@ -19,6 +19,10 @@ class Parser():
     def __init__(self):
         self.defs = {} # dict of DEFINE
         pass
+
+    def _debug_log(self, *args):
+        if self.debug:
+            print(*args)
     
     def insert_define(self, name, params=None, token=None):
         new_params = params or []
@@ -154,7 +158,7 @@ class Parser():
             self._read_file_lines(filepath, insert_def, try_if_else)
 
             if filepath in header_files:
-                print('Read File:', filepath)
+                self._debug_log('Read File: %s', filepath)
                 header_done.add(filepath)
  
         for header_file in header_files:
@@ -205,8 +209,8 @@ class Parser():
     def expand_token(self, token, try_if_else=False, raise_key_error=True):
         expanded_token = self.strip_token(token)
         self.iterate += 1
-        if self.iterate > 20 and self.debug:
-            print(f'{" "*((self.iterate-20)//5)}{self.iterate:3} {token}')
+        if self.iterate > 20:
+            self._debug_log(f'{" "*((self.iterate-20)//5)}{self.iterate:3} {token}')
 
         tokens = self.find_tokens(expanded_token)
         if len(tokens):
