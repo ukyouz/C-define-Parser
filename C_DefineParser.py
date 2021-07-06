@@ -243,10 +243,6 @@ class Parser():
                     params = self.expand_token(_token.line, try_if_else, raise_key_error)
                     expanded_token = re.sub(word_boundary(_token.line), params, expanded_token)
                     # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
-                elif name not in self.defs:
-                    if raise_key_error:
-                        raise KeyError(f'token \'{name}\' is not defined!')
-                    expanded_token = expanded_token.replace(_token.line, '(0)')
 
         if expanded_token in self.defs:
             expanded_token = self.expand_token(self.defs[token].token, try_if_else, raise_key_error)
