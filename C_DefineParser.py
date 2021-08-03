@@ -38,7 +38,7 @@ class Parser():
             raise KeyError(f'token \'{name}\' is not defined!')
 
         del self.defs[name]
-    
+
     def strip_token(self, token):
         if token == None:
             return None
@@ -49,13 +49,13 @@ class Parser():
             for match in comments:
                 token = token.replace(match.group(0), '')
         return token
-    
+
     def _try_eval_num(self, token):
         try:
-            return eval(token)
+            return eval(token.replace('/', '//'))
         except:
             return None
-        
+
     def _read_file_lines(self, filepath, func, try_if_else=False, ignore_header_guard=False):
         regex_line_break = r'\\\s*'
         regex_line_comment = r'\s*\/\/.+'
@@ -104,7 +104,7 @@ class Parser():
                     func(single_line)
                     if_done_bmp |= BIT(if_depth)
                 multi_lines = ''
-    
+
     def _get_define(self, line):
         match = re.match(REGEX_DEFINE, line)
         if match == None:
@@ -136,13 +136,13 @@ class Parser():
             ]
             if len(included_files) > 1:
                 raise NameError(', '.join(included_files))
-            
+
             return included_files[0] if len(included_files) else None
 
         def read_header(filepath):
             if filepath == None or filepath in header_done:
                 return
-                
+
             def insert_def(line):
                 match_include = re.match(REGEX_INCLUDE, line)
                 if match_include != None:
@@ -155,7 +155,10 @@ class Parser():
                     return
                 self.defs[define.name] = define
 
-            self._read_file_lines(filepath, insert_def, try_if_else)
+            try:
+                self._read_file_lines(filepath, insert_def, try_if_else)
+            except UnicodeDecodeError:
+                print(f'Fail to open {filepath!r} with UTF-8 encoding.')
 
             if filepath in header_files:
                 self._debug_log('Read File: %s', filepath)
@@ -174,7 +177,10 @@ class Parser():
             #     return
             self.defs[define.name] = define
 
-        self._read_file_lines(filepath, insert_def, try_if_else)
+        try:
+            self._read_file_lines(filepath, insert_def, try_if_else)
+        except UnicodeDecodeError:
+            print(f'Fail to open :{filepath} with UTF-8 encoding.')
     
     def find_tokens(self, token):
         def fine_token_params(params):
@@ -204,7 +210,7 @@ class Parser():
             return ret_tokens
         else:
            return []
-    
+
     # @functools.lru_cache
     def expand_token(self, token, try_if_else=False, raise_key_error=True):
         expanded_token = self.strip_token(token)
@@ -246,7 +252,7 @@ class Parser():
 
         if expanded_token in self.defs:
             expanded_token = self.expand_token(self.defs[token].token, try_if_else, raise_key_error)
-            
+
             # try to eval the value, to reduce the bracket count
             token_val = self._try_eval_num(expanded_token)
             if token_val:
