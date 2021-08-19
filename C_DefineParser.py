@@ -18,7 +18,6 @@ class Parser():
 
     def __init__(self):
         self.defs = {} # dict of DEFINE
-        pass
 
     def _debug_log(self, *args):
         if self.debug:
@@ -136,12 +135,16 @@ class Parser():
         header_done = set()
         pre_defined_keys = self.defs.keys()
 
-        def get_included_file(path):
+        def get_included_file(path, src_file):
             included_files = [str(h)
                 for h in header_files
                 if path in str(h) and
                 os.path.basename(path) == os.path.basename(h)
             ]
+            if len(included_files) > 1:
+                included_files = [f for f in included_files
+                                  if str(f).replace(path, '') in str(src_file)]
+
             if len(included_files) > 1:
                 raise NameError(', '.join(included_files))
 
@@ -156,7 +159,7 @@ class Parser():
                 if match_include != None:
                     # parse included file first
                     path = match_include.group('PATH')
-                    included_file = get_included_file(path)
+                    included_file = get_included_file(path, src_file=filepath)
                     read_header(included_file)
                 define = self._get_define(line)
                 if define == None or define.name in pre_defined_keys:
