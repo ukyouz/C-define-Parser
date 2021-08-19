@@ -207,7 +207,7 @@ class Parser():
         if self._try_eval_num(token):
             return []
         tokens = list(re.finditer(REGEX_TOKEN, token))
-        params = ''
+        params = None
         if len(tokens):
             ret_tokens = []
             for match in tokens:
@@ -217,7 +217,8 @@ class Parser():
                     end_pos = match.end()
                     if params_required is not None:
                         params = fine_token_params(token[end_pos:])
-                ret_tokens.append(TOKEN(name=_token, params=params, line=_token+params))
+                param_str = params if params else ''
+                ret_tokens.append(TOKEN(name=_token, params=params, line=_token+param_str))
             return ret_tokens
         else:
            return []
