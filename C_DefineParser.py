@@ -255,6 +255,8 @@ class Parser():
                         for old_p, new_p in zip(old_params, new_params):
                             new_token = re.sub(word_boundary(old_p), new_p, new_token)
                         # expanded_token = expanded_token.replace(_token.line, new_token)
+                        new_token_val = self._try_eval_num(new_token)
+                        new_token = str(new_token_val) if new_token_val else new_token
                         if _token.line == name:
                             expanded_token = re.sub(word_boundary(_token.line), new_token, expanded_token)
                         else:
