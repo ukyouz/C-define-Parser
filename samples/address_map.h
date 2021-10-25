@@ -11,9 +11,9 @@
 #endif
 
 #define MULTI_LINE_DEF       \
-                        (1)  \
+                        (1L) \
                         +    \
-                        (2)
+                        (2LLU)
 
 /*
  * Sample NVME Model
@@ -65,7 +65,7 @@
 #define BUFFER_1_BASE                (ALIGN_2N(BUFFER_0_BASE + BUFFER_0_SIZE, BUFFER_ALIGN_SHIFT))
 #define BUFFER_1_SIZE                (0x1000)
 
-#endif 
+#endif
 
 #define FIFO_0_BASE                  (ALIGN_2N(BUFFER_1_BASE, 4))
 #define FIFO_0_UNIT                  (32 /* For unit size (Byte) */)

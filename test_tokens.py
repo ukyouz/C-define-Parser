@@ -87,7 +87,8 @@ def parser_test():
 	('BUFFER_ALIGN_SHIFT', 2),
 	('MULTI_LINE_DEF', 3),
 	('(ALIGN_2N(BUFFER_BASE, BUFFER_ALIGN_SHIFT))', 0x4000000),
-	('NVME_IO_QUEUEN_BASE(8)', 0x2B10000)
+	('NVME_IO_QUEUE8_BASE', 0x2D10000),
+	('NVME_IO_QUEUEN_BASE(8)', 0x2D10000)
 ])
 def test_token(parser_test, token, expected_value):
 	token = parser_test.expand_token(token)
@@ -98,11 +99,12 @@ def test_token(parser_test, token, expected_value):
 	('BUFFER_ALIGN_SHIFT', 2),
 	('MULTI_LINE_DEF', 3),
 	('BUFFER_0_BASE', 0x4000000),
-	('NVME_IO_QUEUE0_BASE', 0xB10000),
+	('NVME_IO_QUEUE0_BASE', 0xD10000),
+	('NVME_IO_QUEUE0_BASE', 0xD10000),
 ])
 def test_define(parser_test, define, expected_value):
 	define = parser_test.get_expand_define(define)
-	value = eval(define.token)
+	value = parser_test._try_eval_num(define.token)
 	assert value == expected_value
 
 def test_existence(parser_test):
