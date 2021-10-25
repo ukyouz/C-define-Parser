@@ -50,8 +50,19 @@ class Parser():
         return token
 
     def _try_eval_num(self, token):
+        REG_LITERALS = [
+            r'\b(?P<NUM>[0-9]+)([ul]|ull?|ll?u|ll)\b',
+            r'\b(?P<NUM>0[0-9]+)([ul]|ull?|ll?u|ll)\b',
+            r'\b(?P<NUM>0x[0-9]+)([ul]|ull?|ll?u|ll)\b',
+        ]
+        for reg in REG_LITERALS:
+            for match in re.finditer(reg, token, re.IGNORECASE):
+                literal_integer = match.group(0)
+                number = match.group('NUM')
+                token = token.replace(literal_integer, number)
+            break
         try:
-            return eval(token.replace('/', '//'))
+            return int(eval(token.replace('/', '//')))
         except:
             return None
 
@@ -195,6 +206,8 @@ class Parser():
 
     def find_tokens(self, token):
         def fine_token_params(params):
+            if len(params) and params[0] != '(':
+                return None
             # (() ())
             brackets = 0
             new_params = ''
@@ -207,11 +220,11 @@ class Parser():
         if self._try_eval_num(token):
             return []
         tokens = list(re.finditer(REGEX_TOKEN, token))
-        params = None
         if len(tokens):
             ret_tokens = []
             for match in tokens:
                 _token = match.group('NAME')
+                params = None
                 if _token in self.defs:
                     params_required = self.defs[_token].params
                     end_pos = match.end()
@@ -222,6 +235,29 @@ class Parser():
             return ret_tokens
         else:
            return []
+
+    def _check_parentheses(self, token):
+        lparan_cnt = 0
+        rparan_cnt = 0
+        for char in token:
+            if char == '(':
+                lparan_cnt += 1
+            if char == ')':
+                rparan_cnt += 1
+        return lparan_cnt == rparan_cnt
+
+    def _iter_arg(self, params):
+        if len(params) == 0:
+            return []
+        assert params[0] == '(' and params[-1] == ')'
+        parma_list = params[1:-1].split(',')
+        arguments = []
+        for arg in parma_list:
+            arguments.append(arg)
+            prams_str = ','.join(arguments)
+            if self._check_parentheses(prams_str):
+                yield prams_str
+                arguments = []
 
     # @functools.lru_cache
     def expand_token(self, token, try_if_else=False, raise_key_error=True):
@@ -249,7 +285,7 @@ class Parser():
                             tokens.remove(processed[0])
                     if name in self.defs:
                         old_params = self.defs[name].params or []
-                        new_params = params[1:-1].split(',') if len(params) else old_params
+                        new_params = list(self._iter_arg(params))
                         new_token = self.defs[name].token
                         # Expand the token
                         for old_p, new_p in zip(old_params, new_params):
@@ -277,7 +313,7 @@ class Parser():
 
             # try to eval the value, to reduce the bracket count
             token_val = self._try_eval_num(expanded_token)
-            if token_val:
+            if token_val is not None:
                 expanded_token = str(token_val)
 
         return expanded_token
@@ -293,7 +329,7 @@ class Parser():
             token = self.expand_token(define.token, try_if_else, raise_key_error=False)
             if define.name in self.defs:
                 token_val = self._try_eval_num(token)
-                if token_val:
+                if token_val is not None:
                     self.defs[define.name] = self.defs[define.name]._replace(token=str(token_val))
             defines.append(DEFINE(
                 name=define.name,
