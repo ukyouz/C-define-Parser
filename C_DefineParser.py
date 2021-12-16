@@ -17,7 +17,11 @@ class Parser():
     iterate = 0
 
     def __init__(self):
+        self.reset()
+
+    def reset(self):
         self.defs = {} # dict of DEFINE
+        self.folder = ''
 
     def _debug_log(self, *args):
         if self.debug:
@@ -142,6 +146,7 @@ class Parser():
         )
 
     def read_folder_h(self, directory, try_if_else=True):
+        self.folder = directory
         header_files = list(pathlib.Path(directory).glob('**/*.h'))
         header_done = set()
         pre_defined_keys = self.defs.keys()
