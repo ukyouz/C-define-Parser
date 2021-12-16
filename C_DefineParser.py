@@ -78,10 +78,26 @@ class Parser():
         if_true_bmp = 1 # bitmap for every #if statement
         if_done_bmp = 1 # bitmap for every #if statement
         first_guard_token = True
+        is_block_comment = False
         with open(filepath, 'r', errors='replace') as fs:
             multi_lines = ''
             for line in fs.readlines():
-                # TODO: multilines comment with /* */
+
+                if not is_block_comment:
+                    if '/*' in line: # start of block comment
+                        block_comment_start = line.index('/*')
+                        is_block_comment = '*/' not in line
+                        block_comment_ending = line.index('*/') + 2 if not is_block_comment else len(line)
+                        line = line[:block_comment_start] + line[block_comment_ending:]
+                        multi_lines += line
+
+                if is_block_comment:
+                    if '*/' in line: # end of block comment
+                        line = line[line.index('*/') + 2:]
+                        is_block_comment = False
+                    else:
+                        continue
+
                 line = re.sub(regex_line_comment, '', self.strip_token(line))
 
                 if try_if_else:
