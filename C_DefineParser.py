@@ -49,7 +49,7 @@ class Parser():
                 token = token.replace(match.group(0), '')
         return token
 
-    def _try_eval_num(self, token):
+    def try_eval_num(self, token):
         REG_LITERALS = [
             r'\b(?P<NUM>[0-9]+)([ul]|ull?|ll?u|ll)\b',
             r'\b(?P<NUM>0[0-9]+)([ul]|ull?|ll?u|ll)\b',
@@ -92,12 +92,12 @@ class Parser():
                             if ignore_header_guard and first_guard_token
                             else self.expand_token(token, try_if_else, raise_key_error=False)
                         )
-                        if_token_val = self._try_eval_num(if_token) or 0
+                        if_token_val = self.try_eval_num(if_token) or 0
                         if_true_bmp |= BIT(if_depth) * (if_token_val ^ (match_if.group('NOT') == 'n'))
                         first_guard_token = False if match_if.group('NOT') == 'n' else first_guard_token
                     elif match_elif:
                         if_token = self.expand_token(match_elif.group('TOKEN'), try_if_else, raise_key_error=False)
-                        if_token_val = self._try_eval_num(if_token) or 0
+                        if_token_val = self.try_eval_num(if_token) or 0
                         if_true_bmp |= (BIT(if_depth) * if_token_val)
                         if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
                     elif match_else:
@@ -217,7 +217,7 @@ class Parser():
                 if brackets == 0:
                     break
             return new_params
-        if self._try_eval_num(token):
+        if self.try_eval_num(token):
             return []
         tokens = list(re.finditer(REGEX_TOKEN, token))
         if len(tokens):
@@ -291,7 +291,7 @@ class Parser():
                         for old_p, new_p in zip(old_params, new_params):
                             new_token = re.sub(word_boundary(old_p), new_p, new_token)
                         # expanded_token = expanded_token.replace(_token.line, new_token)
-                        new_token_val = self._try_eval_num(new_token)
+                        new_token_val = self.try_eval_num(new_token)
                         new_token = str(new_token_val) if new_token_val else new_token
                         if _token.line == name:
                             expanded_token = re.sub(word_boundary(_token.line), new_token, expanded_token)
@@ -312,7 +312,7 @@ class Parser():
             expanded_token = self.expand_token(self.defs[token].token, try_if_else, raise_key_error)
 
             # try to eval the value, to reduce the bracket count
-            token_val = self._try_eval_num(expanded_token)
+            token_val = self.try_eval_num(expanded_token)
             if token_val is not None:
                 expanded_token = str(token_val)
 
@@ -328,7 +328,7 @@ class Parser():
             self.iterate = 0
             token = self.expand_token(define.token, try_if_else, raise_key_error=False)
             if define.name in self.defs:
-                token_val = self._try_eval_num(token)
+                token_val = self.try_eval_num(token)
                 if token_val is not None:
                     self.defs[define.name] = self.defs[define.name]._replace(token=str(token_val))
             defines.append(DEFINE(
@@ -362,7 +362,7 @@ if __name__ == '__main__':
 
     defines = p.get_expand_defines('./samples/address_map.h', try_if_else=True)
     for define in defines:
-        val = p._try_eval_num(define.token)
+        val = p.try_eval_num(define.token)
         token = hex(val) if val and val > 0x08000 else define.token
         print(f'{define.name:25} {token}')
 
