@@ -19,6 +19,10 @@
  * Sample NVME Model
  */
 
+#if 0||1
+#define SHOULD_BE_1      (1)
+#endif
+
 #if(ENV == ENV_DEVELOP)
 #define NVME_CORE_BASE              (0x00100000)
 #elif(ENV == ENV_TEST)

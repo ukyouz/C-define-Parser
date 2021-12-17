@@ -11,6 +11,7 @@ def parser_default():
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
+	('SHOULD_BE_1', 1),
 	('NVME_CMD_SIZE', 64),
 	('0x00C0000', 0x0C0000),
 	('ALIGN_2N(0x00C0000, 0xC00)', 0x0C0000),
@@ -79,10 +80,11 @@ def parser_test():
 	parser = Parser()
 	inc_path = './samples'
 	parser.insert_define('ENV', token='ENV_TEST')
-	parser.read_folder_h(inc_path)
+	parser.read_folder_h(inc_path, try_if_else=True)
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
+	('SHOULD_BE_1', 1),
 	('NVME_CMD_SIZE', 64),
 	('BUFFER_ALIGN_SHIFT', 2),
 	('MULTI_LINE_DEF', 3),
@@ -91,7 +93,7 @@ def parser_test():
 	('NVME_IO_QUEUEN_BASE(8)', 0x2D10000)
 ])
 def test_token(parser_test, token, expected_value):
-	token = parser_test.expand_token(token)
+	token = parser_test.expand_token(token, try_if_else=True)
 	value = eval(token)
 	assert value == expected_value
 
@@ -104,7 +106,7 @@ def test_token(parser_test, token, expected_value):
 ])
 def test_define(parser_test, define, expected_value):
 	define = parser_test.get_expand_define(define)
-	value = parser_test._try_eval_num(define.token)
+	value = parser_test.try_eval_num(define.token)
 	assert value == expected_value
 
 def test_existence(parser_test):
