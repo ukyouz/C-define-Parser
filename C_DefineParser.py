@@ -66,7 +66,11 @@ class Parser():
                 token = token.replace(literal_integer, number)
             break
         try:
-            return int(eval(token.replace('/', '//')))
+            # syntax translation from C -> Python
+            token = token.replace('/', '//')
+            token = token.replace('&&', ' and ')
+            token = token.replace('||', ' or ')
+            return int(eval(token))
         except:
             return None
 
