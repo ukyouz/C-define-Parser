@@ -7,7 +7,7 @@ from collections import namedtuple
 DEFINE = namedtuple('DEFINE', ('name', 'params', 'token', 'line'), defaults=('', [], '', ''))
 TOKEN = namedtuple('DEFINE', ('name', 'params', 'line'), defaults=('', '', ''))
 
-REGEX_TOKEN = r'\b(?P<NAME>[A-Z_][A-Z0-9_\[\]]+)\b'
+REGEX_TOKEN = r'\b(?P<NAME>[a-zA-Z_][a-zA-Z0-9_\[\]]+)\b'
 REGEX_DEFINE = r'#define\s+'+REGEX_TOKEN+r'(?P<HAS_PAREN>\((?P<PARAMS>[\w, ]*)\))*\s*(?P<TOKEN>[\.\"\'\w\d_, +*!=<>&|\?\:\/\-\(\)\[\]]+)*'
 REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
 BIT = lambda n : 1 << n
