@@ -76,7 +76,7 @@ class Parser():
 
     def _read_file_lines(self, filepath, func, try_if_else=False, ignore_header_guard=False):
         regex_line_break = r'\\\s*'
-        regex_line_comment = r'\s*\/\/.+'
+        regex_line_comment = r'\s*\/\/.*'
 
         if_depth = 0
         if_true_bmp = 1 # bitmap for every #if statement
