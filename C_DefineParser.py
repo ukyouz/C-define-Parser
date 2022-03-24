@@ -64,7 +64,16 @@ class Parser():
                 literal_integer = match.group(0)
                 number = match.group('NUM')
                 token = token.replace(literal_integer, number)
-            break
+        # calculate size of special type
+        # transform type cascading to bit mask for equivalence calculation
+        for sz_log2, special_type in enumerate(("U8", "U16", "U32", "U64")):
+            data_sz = 2 ** sz_log2
+            # sizeof(U16) -> 2
+            token = re.sub(fr"sizeof\(\s*{special_type}\s*\)", str(data_sz), token)
+            # (U16)x -> 0xFFFF & x
+            token = re.sub(
+                fr"\(\s*{special_type}\s*\)", "0x" + "F" * data_sz * 2 + " & ", token
+            )
         try:
             # syntax translation from C -> Python
             token = token.replace('/', '//')
@@ -74,9 +83,16 @@ class Parser():
         except:
             return None
 
-    def _read_file_lines(self, filepath, func, try_if_else=False, ignore_header_guard=False):
-        regex_line_break = r'\\\s*'
-        regex_line_comment = r'\s*\/\/.*'
+    def _read_file_lines(
+        self,
+        filepath,
+        func,
+        try_if_else=False,
+        ignore_header_guard=False,
+        reserve_whitespace=False,
+    ):
+        regex_line_break = r"\\\s*$"
+        regex_line_comment = r"\s*\/\/.*$"
 
         if_depth = 0
         if_true_bmp = 1 # bitmap for every #if statement
@@ -102,7 +118,9 @@ class Parser():
                     else:
                         continue
 
-                line = re.sub(regex_line_comment, '', self.strip_token(line))
+                line = re.sub(
+                    regex_line_comment, "", self.strip_token(line, reserve_whitespace)
+                )
 
                 if try_if_else:
                     match_if = re.match(r'#if((?P<NOT>n*)def)*\s*(?P<TOKEN>.+)', line)
@@ -132,14 +150,16 @@ class Parser():
                         if_done_bmp &= ~BIT(if_depth)
                         if_depth -= 1
 
-                multi_lines += line
+                multi_lines += re.sub(regex_line_break, "", line)
                 if re.search(regex_line_break, line):
                     continue
                 single_line = re.sub(regex_line_break, '', multi_lines)
                 if if_true_bmp == BIT(if_depth + 1) - 1:
                     func(single_line)
                     if_done_bmp |= BIT(if_depth)
-                multi_lines = ''
+                elif try_if_else and (match_if or match_elif or match_else or match_endif):
+                    func(single_line)
+                multi_lines = ""
 
     def _get_define(self, line):
         match = re.match(REGEX_DEFINE, line)
@@ -229,6 +249,35 @@ class Parser():
         except UnicodeDecodeError as e:
             print(f'Fail to open :{filepath}. {e}')
 
+    @contextmanager
+    def read_c(self, filepath, try_if_else=False):
+        """use `with` context manager for having temporary tokens defined in .c source file"""
+
+        defs = {}
+
+        def insert_def(line):
+            define = self._get_define(line)
+            if define == None:
+                return
+            # if len(define.params):
+            #     return
+            defs[define.name] = define
+
+        try:
+            self._read_file_lines(filepath, insert_def, try_if_else)
+            for define in defs.values():
+                self.insert_define(
+                    name=define.name,
+                    params=define.params,
+                    token=define.token,
+                )
+            yield
+        except UnicodeDecodeError as e:
+            print(f"Fail to open :{filepath}. {e}")
+        finally:
+            for define in defs.values():
+                del self.defs[define.name]
+
     def find_tokens(self, token):
         def fine_token_params(params):
             if len(params) and params[0] != '(':
@@ -244,6 +293,11 @@ class Parser():
             return new_params
         if self.try_eval_num(token):
             return []
+
+        # remove string value in token
+        regex_str = r'"[^"]+"'
+        token = re.sub(regex_str, "", token)
+
         tokens = list(re.finditer(REGEX_TOKEN, token))
         if len(tokens):
             ret_tokens = []
@@ -379,7 +433,18 @@ class Parser():
             params=define,
             token=expanded_token,
             line=define.line
+
+    def get_preprocess_source(self, filepath, try_if_else=False):
+        lines = []
+
+        def read_line(line):
+            lines.append(line)
+
+        ignore_header_guard = os.path.splitext(filepath)[1] == ".h"
+        self._read_file_lines(
+            filepath, read_line, try_if_else, ignore_header_guard, reserve_whitespace=True
         )
+        return lines
 
 if __name__ == '__main__':
     p = Parser()
