@@ -5,6 +5,7 @@ import re
 # import functools
 from collections import namedtuple
 from contextlib import contextmanager
+from pprint import pformat, pprint
 
 DEFINE = namedtuple("DEFINE", ("name", "params", "token", "line"), defaults=("", [], "", ""))
 TOKEN = namedtuple("DEFINE", ("name", "params", "line"), defaults=("", "", ""))
@@ -15,6 +16,10 @@ REGEX_DEFINE = (
 )
 REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
 BIT = lambda n: 1 << n
+
+
+class DuplicatedIncludeError(Exception):
+    """assert when parser can not found ONE valid include header file."""
 
 
 class Parser:
@@ -64,8 +69,9 @@ class Parser:
     def try_eval_num(self, token):
         REG_LITERALS = [
             r"\b(?P<NUM>[0-9]+)([ul]|ull?|ll?u|ll)\b",
-            r"\b(?P<NUM>0[0-9]+)([ul]|ull?|ll?u|ll)\b",
-            r"\b(?P<NUM>0x[0-9]+)([ul]|ull?|ll?u|ll)\b",
+            r"\b(?P<NUM>0b[01]+)([ul]|ull?|ll?u|ll)\b",
+            r"\b(?P<NUM>0[0-7]+)([ul]|ull?|ll?u|ll)\b",
+            r"\b(?P<NUM>0x[0-9a-f]+)([ul]|ull?|ll?u|ll)\b",
         ]
         # remove integer literals type hint
         for reg in REG_LITERALS:
@@ -76,12 +82,12 @@ class Parser:
         # calculate size of special type
         # transform type cascading to bit mask for equivalence calculation
         for sz_log2, special_type in enumerate(("U8", "U16", "U32", "U64")):
-            data_sz = 2 ** sz_log2
+            data_sz = 2**sz_log2
             # sizeof(U16) -> 2
-            token = re.sub(fr"sizeof\(\s*{special_type}\s*\)", str(data_sz), token)
+            token = re.sub(rf"sizeof\(\s*{special_type}\s*\)", str(data_sz), token)
             # (U16)x -> 0xFFFF & x
             token = re.sub(
-                fr"\(\s*{special_type}\s*\)", "0x" + "F" * data_sz * 2 + " & ", token
+                rf"\(\s*{special_type}\s*\)", "0x" + "F" * data_sz * 2 + " & ", token
             )
         try:
             # syntax translation from C -> Python
@@ -222,7 +228,7 @@ class Parser:
                 ]
 
             if len(included_files) > 1:
-                raise NameError(", ".join(included_files))
+                raise DuplicatedIncludeError(pformat(included_files, indent=4, width=120))
 
             return included_files[0] if len(included_files) else None
 
@@ -253,6 +259,8 @@ class Parser:
 
         for header_file in header_files:
             read_header(header_file)
+
+        return True
 
     def read_h(self, filepath, try_if_else=False):
         def insert_def(line):
