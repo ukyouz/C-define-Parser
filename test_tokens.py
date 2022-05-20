@@ -69,6 +69,20 @@ def test_define(parser_public, define, expected_value):
 	value = eval(define.token)
 	assert value == expected_value
 
+def test_stacks(parser_public):
+    def _compare(token1, token2):
+        a = parser_public.expand_token(token1, try_if_else=True)
+        b = parser_public.expand_token(token2, try_if_else=True)
+        assert eval(a) == eval(b)
+    _compare('NVME_IO_QUEUE0_BASE', 'NVME_IO_QUEUEN_BASE(0)')
+    _compare('NVME_IO_QUEUE1_BASE', 'NVME_IO_QUEUEN_BASE(1)')
+    _compare('NVME_IO_QUEUE2_BASE', 'NVME_IO_QUEUEN_BASE(2)')
+    _compare('NVME_IO_QUEUE3_BASE', 'NVME_IO_QUEUEN_BASE(3)')
+    _compare('NVME_IO_QUEUE4_BASE', 'NVME_IO_QUEUEN_BASE(4)')
+    _compare('NVME_IO_QUEUE5_BASE', 'NVME_IO_QUEUEN_BASE(5)')
+    _compare('NVME_IO_QUEUE6_BASE', 'NVME_IO_QUEUEN_BASE(6)')
+    _compare('NVME_IO_QUEUE7_BASE', 'NVME_IO_QUEUEN_BASE(7)')
+
 def test_existence(parser_public):
 	define = parser_public.get_expand_define('BUFFER_1_BASE', try_if_else=True)
 	assert define == None
@@ -89,20 +103,34 @@ def parser_test():
 	('BUFFER_ALIGN_SHIFT', 2),
 	('MULTI_LINE_DEF', 3),
 	('(ALIGN_2N(BUFFER_BASE, BUFFER_ALIGN_SHIFT))', 0x4000000),
-	('NVME_IO_QUEUE8_BASE', 0x2D10000),
-	('NVME_IO_QUEUEN_BASE(8)', 0x2D10000)
+	('NVME_IO_QUEUE8_BASE', 0x2B10000),
+	('NVME_IO_QUEUEN_BASE(8)', 0x2B10000)
 ])
 def test_token(parser_test, token, expected_value):
 	token = parser_test.expand_token(token, try_if_else=True)
 	value = eval(token)
 	assert value == expected_value
 
+def test_stacks(parser_test):
+    def _compare(token1, token2):
+        a = parser_test.expand_token(token1, try_if_else=True)
+        b = parser_test.expand_token(token2, try_if_else=True)
+        assert eval(a) == eval(b)
+    _compare('NVME_IO_QUEUE0_BASE', 'NVME_IO_QUEUEN_BASE(0)')
+    _compare('NVME_IO_QUEUE1_BASE', 'NVME_IO_QUEUEN_BASE(1)')
+    _compare('NVME_IO_QUEUE2_BASE', 'NVME_IO_QUEUEN_BASE(2)')
+    _compare('NVME_IO_QUEUE3_BASE', 'NVME_IO_QUEUEN_BASE(3)')
+    _compare('NVME_IO_QUEUE4_BASE', 'NVME_IO_QUEUEN_BASE(4)')
+    _compare('NVME_IO_QUEUE5_BASE', 'NVME_IO_QUEUEN_BASE(5)')
+    _compare('NVME_IO_QUEUE6_BASE', 'NVME_IO_QUEUEN_BASE(6)')
+    _compare('NVME_IO_QUEUE7_BASE', 'NVME_IO_QUEUEN_BASE(7)')
+
 @pytest.mark.parametrize("define, expected_value", [
 	('BUFFER_ALIGN_SHIFT', 2),
 	('MULTI_LINE_DEF', 3),
 	('BUFFER_0_BASE', 0x4000000),
-	('NVME_IO_QUEUE0_BASE', 0xD10000),
-	('NVME_IO_QUEUE0_BASE', 0xD10000),
+	('NVME_IO_QUEUE0_BASE', 0xB10000),
+	('NVME_IO_QUEUE0_BASE', 0xB10000),
 ])
 def test_define(parser_test, define, expected_value):
 	define = parser_test.get_expand_define(define)
