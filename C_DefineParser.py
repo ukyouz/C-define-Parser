@@ -37,7 +37,8 @@ class Parser:
         if self.debug:
             print(*args)
 
-    def insert_define(self, name, params=None, token=None):
+    def insert_define(self, name, *, params=None, token=None):
+        ''' params: list of parameters required, token: define body '''
         new_params = params or []
         new_token = token or ""
         self.defs[name] = DEFINE(
