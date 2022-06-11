@@ -6,10 +6,8 @@
 #define ENV_SIMULATE                (2)
 #define ENV_TEST                    (3)
 
-#ifdef WIN32
+#ifndef ENV
 #define ENV                          (ENV_DEVELOP)
-#else
-#define ENV                          (ENV_PUBLIC) // ENV_TEST
 #endif
 
 #endif
