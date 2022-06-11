@@ -22,6 +22,26 @@ class DuplicatedIncludeError(Exception):
     """assert when parser can not found ONE valid include header file."""
 
 
+def is_junction(path):
+    try:
+        return bool(os.readlink(path))
+    except OSError:
+        return False
+
+
+def get_junction_folder(path, root=""):
+    paths = pathlib.Path(path).parts
+    roots = pathlib.Path(root).parts
+    top_to_bottoms = (paths[0: len(roots) + i + 1] for i in range(len(paths) - len(roots)))
+    # top_to_bottoms = (paths[0: i + 1] for i in range(len(paths)))
+    for ps in top_to_bottoms:
+        path = os.path.join(*ps)
+        if is_junction(path):
+            return path
+
+    return None
+
+
 class Parser:
     debug = False
     iterate = 0
@@ -213,7 +233,24 @@ class Parser:
 
     def read_folder_h(self, directory, try_if_else=True):
         self.folder = directory
-        header_files = list(pathlib.Path(directory).glob("**/*.h"))
+
+        # glob all header files that not located in junction (aka. Windows symlink)
+        header_files = []
+        #   glob files are sorted, so just cache previous found junction folder
+        prev_folder, junction = "", None
+        for f in pathlib.Path(directory).glob("**/*.h"):
+            if junction and str(f).startswith(junction):
+                # skip file inside junction
+                continue
+            if (dir := os.path.dirname(f)) and dir != prev_folder:
+                prev_folder = dir
+                if (j := get_junction_folder(os.path.dirname(f), root=directory)):
+                    junction = j
+                else:
+                    header_files.append(f)
+            else:
+                header_files.append(f)
+
         header_done = set()
         pre_defined_keys = self.defs.keys()
 
