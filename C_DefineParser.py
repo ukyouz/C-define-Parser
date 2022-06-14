@@ -174,7 +174,7 @@ class Parser:
                             if ignore_header_guard and first_guard_token
                             else self.expand_token(token, try_if_else, raise_key_error=False)
                         )
-                        if_token_val = self.try_eval_num(if_token) or 0
+                        if_token_val = bool(self.try_eval_num(if_token))
                         if_true_bmp |= BIT(if_depth) * (
                             if_token_val ^ (match_if.group("NOT") == "n")
                         )
@@ -185,7 +185,7 @@ class Parser:
                         if_token = self.expand_token(
                             match_elif.group("TOKEN"), try_if_else, raise_key_error=False
                         )
-                        if_token_val = self.try_eval_num(if_token) or 0
+                        if_token_val = bool(self.try_eval_num(if_token))
                         if_true_bmp |= BIT(if_depth) * if_token_val
                         if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
                     elif match_else:
