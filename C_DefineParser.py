@@ -14,6 +14,7 @@ REGEX_TOKEN = r"\b(?P<NAME>[a-zA-Z_][a-zA-Z0-9_]+)\b"
 REGEX_DEFINE = (
     r"#define\s+" + REGEX_TOKEN + r"(?P<HAS_PAREN>\((?P<PARAMS>[\w, ]*)\))*\s*(?P<TOKEN>.+)*"
 )
+REGEX_UNDEF = r"#undef\s+" + REGEX_TOKEN
 REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
 BIT = lambda n: 1 << n
 
@@ -208,6 +209,13 @@ class Parser:
                 multi_lines = ""
 
     def _get_define(self, line):
+        match = re.match(REGEX_UNDEF, line)
+        if match is not None:
+            name = match.gropu("NAME")
+            if name in self.defs:
+                del self.defs[match.group("NAME")]
+            return
+
         match = re.match(REGEX_DEFINE, line)
         if match == None:
             return
