@@ -104,6 +104,9 @@ class Parser:
         # calculate size of special type
         # transform type cascading to bit mask for equivalence calculation
         for sz_log2, special_type in enumerate(("U8", "U16", "U32", "U64")):
+            # limitation:
+            #   for equation like (U32)1 << (U32)(15) may be calculated to wrong value
+            #   due to operator order
             data_sz = 2**sz_log2
             # sizeof(U16) -> 2
             token = re.sub(rf"sizeof\(\s*{special_type}\s*\)", str(data_sz), token)
