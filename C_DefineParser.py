@@ -1,7 +1,7 @@
+import glob
 import os
 import pathlib
 import re
-import glob
 
 # import functools
 from collections import namedtuple
@@ -34,7 +34,7 @@ def is_junction(path):
 def get_junction_folder(path, root=""):
     paths = pathlib.Path(path).parts
     roots = pathlib.Path(root).parts
-    top_to_bottoms = (paths[0: len(roots) + i + 1] for i in range(len(paths) - len(roots)))
+    top_to_bottoms = (paths[0 : len(roots) + i + 1] for i in range(len(paths) - len(roots)))
     # top_to_bottoms = (paths[0: i + 1] for i in range(len(paths)))
     for ps in top_to_bottoms:
         path = os.path.join(*ps)
@@ -60,7 +60,7 @@ class Parser:
             print(msg % args)
 
     def insert_define(self, name, *, params=None, token=None):
-        ''' params: list of parameters required, token: define body '''
+        """params: list of parameters required, token: define body"""
         new_params = params or []
         new_token = token or ""
         self.defs[name] = DEFINE(
@@ -217,7 +217,7 @@ class Parser:
         if match is not None:
             name = match.group("NAME")
             if name in self.defs:
-                del self.defs[match.group("NAME")]
+                del self.defs[name]
             return
 
         match = re.match(REGEX_DEFINE, line)
@@ -256,7 +256,7 @@ class Parser:
                 continue
             if (dir := os.path.dirname(f)) and dir != prev_folder:
                 prev_folder = dir
-                if (j := get_junction_folder(os.path.dirname(f), root=directory)):
+                if j := get_junction_folder(os.path.dirname(f), root=directory):
                     junction = j
                 else:
                     header_files.append(f)
@@ -275,9 +275,7 @@ class Parser:
                 if path in h and os.path.basename(path) == os.path.basename(h)
             ]
             if len(included_files) > 1:
-                included_files = [
-                    f for f in included_files if f.replace(path, "") in src_file
-                ]
+                included_files = [f for f in included_files if f.replace(path, "") in src_file]
 
             if len(included_files) > 1:
                 raise DuplicatedIncludeError(pformat(included_files, indent=4, width=120))

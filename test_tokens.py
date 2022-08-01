@@ -8,6 +8,7 @@ def parser_default():
 	inc_path = './samples'
 	for inc_file in pathlib.Path(inc_path).glob('**/*.h'):
 		parser.read_h(inc_file)
+	assert parser.expand_token("ENV", try_if_else=True) == "0"
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
@@ -44,6 +45,7 @@ def parser_public():
 	inc_path = './samples'
 	parser.insert_define('ENV', token='ENV_PUBLIC')
 	parser.read_folder_h(inc_path)
+	assert parser.expand_token("ENV", try_if_else=True) == "1"
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
@@ -95,6 +97,7 @@ def parser_test():
 	inc_path = './samples'
 	parser.insert_define('ENV', token='ENV_TEST')
 	parser.read_folder_h(inc_path, try_if_else=True)
+	assert parser.expand_token("ENV", try_if_else=True) == "3"
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
