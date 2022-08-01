@@ -214,7 +214,7 @@ class Parser:
     def _get_define(self, line):
         match = re.match(REGEX_UNDEF, line)
         if match is not None:
-            name = match.gropu("NAME")
+            name = match.group("NAME")
             if name in self.defs:
                 del self.defs[match.group("NAME")]
             return
