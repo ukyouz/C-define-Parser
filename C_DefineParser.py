@@ -1,6 +1,7 @@
 import os
 import pathlib
 import re
+import glob
 
 # import functools
 from collections import namedtuple
@@ -54,9 +55,9 @@ class Parser:
         self.defs = {}  # dict of DEFINE
         self.folder = ""
 
-    def _debug_log(self, *args):
+    def _debug_log(self, msg, *args):
         if self.debug:
-            print(*args)
+            print(msg % args)
 
     def insert_define(self, name, *, params=None, token=None):
         ''' params: list of parameters required, token: define body '''
@@ -249,8 +250,8 @@ class Parser:
         header_files = []
         #   glob files are sorted, so just cache previous found junction folder
         prev_folder, junction = "", None
-        for f in pathlib.Path(directory).glob("**/*.h"):
-            if junction and str(f).startswith(junction):
+        for f in glob.glob(os.path.join(directory, "**/*.h"), recursive=True):
+            if junction and f.startswith(junction):
                 # skip file inside junction
                 continue
             if (dir := os.path.dirname(f)) and dir != prev_folder:
@@ -266,14 +267,16 @@ class Parser:
         pre_defined_keys = self.defs.keys()
 
         def get_included_file(path, src_file):
+            path = os.path.normpath(path)
+            src_file = os.path.normpath(src_file)
             included_files = [
-                str(h)
+                h
                 for h in header_files
-                if path in str(h) and os.path.basename(path) == os.path.basename(h)
+                if path in h and os.path.basename(path) == os.path.basename(h)
             ]
             if len(included_files) > 1:
                 included_files = [
-                    f for f in included_files if str(f).replace(path, "") in str(src_file)
+                    f for f in included_files if f.replace(path, "") in src_file
                 ]
 
             if len(included_files) > 1:
@@ -422,51 +425,50 @@ class Parser:
         if self.iterate > 20:
             self._debug_log(f'{" "*((self.iterate-20)//5)}{self.iterate:3} {token}')
 
+        word_boundary = lambda word: r"\b(##)*%s\b" % re.escape(word)
         tokens = self.find_tokens(expanded_token)
-        if len(tokens):
-            word_boundary = lambda word: r"\b(##)*%s\b" % re.escape(word)
-            for _token in tokens:
-                name = _token.name
-                params = self.strip_token(_token.params)
-                if params is not None:
-                    # Expand all the parameters first
-                    for p_tok in self.find_tokens(params):
-                        params = re.sub(
-                            word_boundary(p_tok.line),
-                            self.expand_token(p_tok.line, try_if_else, raise_key_error),
-                            params,
+        for _token in tokens:
+            name = _token.name
+            params = self.strip_token(_token.params)
+            if params is not None:
+                # Expand all the parameters first
+                for p_tok in self.find_tokens(params):
+                    params = re.sub(
+                        word_boundary(p_tok.line),
+                        self.expand_token(p_tok.line, try_if_else, raise_key_error),
+                        params,
+                    )
+                    processed = list(t for t in tokens if p_tok.name == t.name)
+                    if len(processed):
+                        tokens.remove(processed[0])
+                if name in self.defs:
+                    old_params = self.defs[name].params or []
+                    new_params = list(self._iter_arg(params))
+                    new_token = self.defs[name].token
+                    # Expand the token
+                    for old_p, new_p in zip(old_params, new_params):
+                        new_token = re.sub(word_boundary(old_p), new_p, new_token)
+                    # expanded_token = expanded_token.replace(_token.line, new_token)
+                    new_token_val = self.try_eval_num(new_token)
+                    new_token = str(new_token_val) if new_token_val else new_token
+                    if _token.line == name:
+                        expanded_token = re.sub(
+                            word_boundary(_token.line), new_token, expanded_token
                         )
-                        processed = list(t for t in tokens if p_tok.name == t.name)
-                        if len(processed):
-                            tokens.remove(processed[0])
-                    if name in self.defs:
-                        old_params = self.defs[name].params or []
-                        new_params = list(self._iter_arg(params))
-                        new_token = self.defs[name].token
-                        # Expand the token
-                        for old_p, new_p in zip(old_params, new_params):
-                            new_token = re.sub(word_boundary(old_p), new_p, new_token)
-                        # expanded_token = expanded_token.replace(_token.line, new_token)
-                        new_token_val = self.try_eval_num(new_token)
-                        new_token = str(new_token_val) if new_token_val else new_token
-                        if _token.line == name:
-                            expanded_token = re.sub(
-                                word_boundary(_token.line), new_token, expanded_token
-                            )
-                        else:
-                            expanded_token = expanded_token.replace(_token.line, new_token)
-                        # Take care the remaining tokens
-                        expanded_token = self.expand_token(
-                            expanded_token, try_if_else, raise_key_error
-                        )
-                    elif raise_key_error:
-                        raise KeyError(f"token '{name}' is not defined!")
-                    # else:
-                    #     expanded_token = expanded_token.replace(_token.line, '(0)')
-                elif name is not expanded_token:
-                    params = self.expand_token(_token.line, try_if_else, raise_key_error)
-                    expanded_token = re.sub(word_boundary(_token.line), params, expanded_token)
-                    # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
+                    else:
+                        expanded_token = expanded_token.replace(_token.line, new_token)
+                    # Take care the remaining tokens
+                    expanded_token = self.expand_token(
+                        expanded_token, try_if_else, raise_key_error
+                    )
+                elif raise_key_error:
+                    raise KeyError(f"token '{name}' is not defined!")
+                # else:
+                #     expanded_token = expanded_token.replace(_token.line, '(0)')
+            elif name is not expanded_token:
+                params = self.expand_token(_token.line, try_if_else, raise_key_error)
+                expanded_token = re.sub(word_boundary(_token.line), params, expanded_token)
+                # expanded_token = expanded_token.replace(match.group(0), self.expand_token(match.group(0)))
 
         if expanded_token in self.defs:
             expanded_token = self.expand_token(
@@ -477,6 +479,8 @@ class Parser:
             token_val = self.try_eval_num(expanded_token)
             if token_val is not None:
                 expanded_token = str(token_val)
+        elif len(tokens) and expanded_token == name:
+            return "0"
 
         return expanded_token
 
