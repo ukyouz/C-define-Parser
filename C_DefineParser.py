@@ -2,7 +2,7 @@ import glob
 import os
 import pathlib
 import re
-
+import subprocess
 # import functools
 from collections import namedtuple
 from contextlib import contextmanager
@@ -24,24 +24,28 @@ class DuplicatedIncludeError(Exception):
     """assert when parser can not found ONE valid include header file."""
 
 
-def is_junction(path):
-    try:
-        return bool(os.readlink(path))
-    except OSError:
-        return False
+def is_git(folder):
+    markers = {".git", ".gitlab"}
+    files = set(os.listdir(folder))
+    return len(markers & files)
 
 
-def get_junction_folder(path, root=""):
-    paths = pathlib.Path(path).parts
-    roots = pathlib.Path(root).parts
-    top_to_bottoms = (paths[0 : len(roots) + i + 1] for i in range(len(paths) - len(roots)))
-    # top_to_bottoms = (paths[0: i + 1] for i in range(len(paths)))
-    for ps in top_to_bottoms:
-        path = os.path.join(*ps)
-        if is_junction(path):
-            return path
+def git_lsfiles(directory, ext=".h"):
+    proc = subprocess.run(
+        ["git", "--git-dir", os.path.join(directory, ".git"), "ls-files"],
+        capture_output=True,
+        shell=True,  # remove flashing empty cmd window prompt
+    )
+    if proc.returncode > 0:
+        # fallback to normal glob if git command fail
+        return glob.glob(os.path.join(directory, "**/*" + ext), recursive=True)
 
-    return None
+    filelist = proc.stdout.decode().split("\n")
+    return [
+        os.path.join(directory, filename)
+        for filename in filelist
+        if filename.endswith(ext)
+    ]
 
 
 class Parser:
@@ -246,22 +250,10 @@ class Parser:
     def read_folder_h(self, directory, try_if_else=True):
         self.folder = directory
 
-        # glob all header files that not located in junction (aka. Windows symlink)
-        header_files = []
-        #   glob files are sorted, so just cache previous found junction folder
-        prev_folder, junction = "", None
-        for f in glob.glob(os.path.join(directory, "**/*.h"), recursive=True):
-            if junction and f.startswith(junction):
-                # skip file inside junction
-                continue
-            if (dir := os.path.dirname(f)) and dir != prev_folder:
-                prev_folder = dir
-                if j := get_junction_folder(os.path.dirname(f), root=directory):
-                    junction = j
-                else:
-                    header_files.append(f)
-            else:
-                header_files.append(f)
+        if is_git(directory):
+            header_files = git_lsfiles(directory, ".h")
+        else:
+            header_files = glob.glob(os.path.join(directory, "**/*.h"), recursive=True)
 
         header_done = set()
         pre_defined_keys = self.defs.keys()
