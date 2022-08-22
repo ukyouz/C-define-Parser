@@ -1,13 +1,11 @@
 import pytest
-import pathlib
 from C_DefineParser import Parser
 
 @pytest.fixture
 def parser_default():
 	parser = Parser()
 	inc_path = './samples'
-	for inc_file in pathlib.Path(inc_path).glob('**/*.h'):
-		parser.read_h(inc_file)
+	parser.read_folder_h(inc_path)
 	assert parser.expand_token("ENV", try_if_else=True) == "0"
 	return parser
 
