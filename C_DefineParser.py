@@ -65,6 +65,7 @@ class Parser:
 
     def reset(self):
         self.defs = {}  # dict of DEFINE
+        self.zero_defs = set()
         self.folder = ""
 
     def insert_define(self, name, *, params=None, token=None):
@@ -81,10 +82,12 @@ class Parser:
         )
 
     def remove_define(self, name):
-        if name not in self.defs:
+        if name in self.defs:
+            del self.defs[name]
+        elif name in self.zero_defs:
+            self.zero_defs.remove(name)
+        else:
             raise KeyError("token '{}' is not defined!".format(name))
-
-        del self.defs[name]
 
     def strip_token(self, token, reserve_whitespace=False):
         if token == None:
@@ -490,10 +493,10 @@ class Parser:
                     expanded_token = self.expand_token(
                         expanded_token, try_if_else, raise_key_error, zero_undefined
                     )
+                elif name in self.zero_defs:
+                    expanded_token = expanded_token.replace(_token.line, "(0)")
                 elif raise_key_error:
                     raise KeyError("token '{}' is not defined!".format(name))
-                # else:
-                #     expanded_token = expanded_token.replace(_token.line, '(0)')
             elif name is not expanded_token:
                 params = self.expand_token(
                     _token.line, try_if_else, raise_key_error, zero_undefined
@@ -512,7 +515,10 @@ class Parser:
             token_val = self.try_eval_num(expanded_token)
             if token_val is not None:
                 expanded_token = str(token_val)
+        elif expanded_token in self.zero_defs:
+            return "0"
         elif zero_undefined and len(tokens) and expanded_token == name:
+            self.zero_defs.add(name)
             return "0"
 
         return expanded_token
@@ -536,6 +542,8 @@ class Parser:
                         self.defs[define.name] = self.defs[define.name]._replace(
                             token=str(token_val)
                         )
+                elif define.name in self.zero_defs:
+                    token_val = "0"
                 defines.append(
                     DEFINE(
                         name=define.name,
