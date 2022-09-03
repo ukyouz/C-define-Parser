@@ -2,7 +2,7 @@
 
 This is not a C preprocessor, but only a simple define parser for C header files.
 
-When lots of defined constants stack to each other, it begins hard to tell the actual value of the each constant, that may be important if you want to debug. However, such information usually disppaears due to C proprocessor, it indeed knows all constant values and replace them all into the real executable sections, as the result you lose the list of those important constants.
+When lots of defined constants stack to each other, it begins hard to tell the actual value of the each constant, that may be important if you want to debug. However, such information usually disppaears due to C preprocessor, it indeed knows all constant values and replace them all into the real executable sections, as the result you lose the list of those important constants.
 
 If you have used text editor with intellisense feature, they may possible expand the macro for user, for example when hovering over the macro, but they “expand” only. That means, you may get a very long line with a lot of brackets, if luckily, you can copy-paste the long line into other place and get the actual value of it. Imaging their are hundreds of constants in a big project…, you get the idea.
 
