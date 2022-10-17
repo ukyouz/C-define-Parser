@@ -16,14 +16,15 @@ DEFINE = namedtuple(
 )
 TOKEN = namedtuple("TOKEN", ("name", "params", "line"), defaults=("", "", ""))
 
-REGEX_TOKEN = r"\b(?P<NAME>[a-zA-Z_][a-zA-Z0-9_]+)\b"
-REGEX_DEFINE = (
+REGEX_TOKEN = re.compile(r"\b(?P<NAME>[a-zA-Z_][a-zA-Z0-9_]+)\b")
+REGEX_DEFINE = re.compile(
     r"#define\s+"
-    + REGEX_TOKEN
+    + REGEX_TOKEN.pattern
     + r"(?P<HAS_PAREN>\((?P<PARAMS>[\w, ]*)\))*\s*(?P<TOKEN>.+)*"
 )
-REGEX_UNDEF = r"#undef\s+" + REGEX_TOKEN
-REGEX_INCLUDE = r'#include\s+["<](?P<PATH>.+)[">]\s*'
+REGEX_UNDEF = re.compile(r"#undef\s+" + REGEX_TOKEN.pattern)
+REGEX_INCLUDE = re.compile(r'#include\s+["<](?P<PATH>.+)[">]\s*')
+REGEX_STRING = re.compile(r'"[^"]+"')
 BIT = lambda n: 1 << n
 
 logger = logging.getLogger(os.path.basename(__name__))
@@ -51,6 +52,52 @@ def git_lsfiles(directory, ext=".h"):
         for filename in filelist
         if filename.endswith(ext)
     ]
+
+
+compile_flag_parser = ArgumentParser()
+compile_flag_parser.add_argument("-I", "--include", action="append", nargs=1, metavar="PATH", default=[])
+
+
+REG_LITERALS = [
+    re.compile(r"\b(?P<NUM>[0-9]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>0b[01]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>0[0-7]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>0x[0-9a-f]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+]
+
+REG_SPECIAL_SIZEOFTYPES = [
+    re.compile(r"sizeof\(\s*U8\s*\)"),
+    re.compile(r"sizeof\(\s*U16\s*\)"),
+    re.compile(r"sizeof\(\s*U32\s*\)"),
+    re.compile(r"sizeof\(\s*U64\s*\)"),
+]
+
+REG_SPECIAL_TYPES = [
+    re.compile(r"\(\s*U8\s*\)"),
+    re.compile(r"\(\s*U16\s*\)"),
+    re.compile(r"\(\s*U32\s*\)"),
+    re.compile(r"\(\s*U64\s*\)"),
+]
+
+REG_STATEMENT_IF = re.compile(r"#\s*if(?P<DEF>(?P<NOT>n*)def)*\s*(?P<TOKEN>.+)")
+REG_STATEMENT_ELIF = re.compile(r"#\s*elif\s*(?P<TOKEN>.+)")
+REG_STATEMENT_ELSE = re.compile(r"#\s*else.*")
+REG_STATEMENT_ENDIF = re.compile(r"#\s*endif.*")
+
+REGEX_SYNTAX_LINE_COMMENT = re.compile(r"\s*\/\/.*$")
+REGEX_SYNTAX_INLINE_COMMENT = re.compile(r"\/\*[^\/]+\*\/")
+REGEX_SYNTAX_LINE_BREAK = re.compile(r"\\\s*$")
+
+
+def get_include_paths(direcotry):
+    compile_flag_file = os.path.join(direcotry, "compile_flags.txt")
+    if not os.path.exists(compile_flag_file):
+        return
+    with open(compile_flag_file, "r") as fs:
+        flags = " ".join(x.rstrip() for x in fs.readlines())
+        args = compile_flag_parser.parse_args(flags)
+        include_paths = sorted(args.include, key=len)
+        print(include_paths)
 
 
 class DuplicatedIncludeError(Exception):
@@ -96,45 +143,33 @@ class Parser:
             token = token.rstrip()
         else:
             token = token.strip()
-        inline_comment_regex = r"\/\*[^\/]+\*\/"
-        comments = list(re.finditer(inline_comment_regex, token))
-        if len(comments):
-            for match in comments:
-                token = token.replace(match.group(0), "")
+        token = REGEX_SYNTAX_INLINE_COMMENT.sub("", token)
         return token
 
     def try_eval_num(self, token):
-        REG_LITERALS = [
-            r"\b(?P<NUM>[0-9]+)([ul]|ull?|ll?u|ll)\b",
-            r"\b(?P<NUM>0b[01]+)([ul]|ull?|ll?u|ll)\b",
-            r"\b(?P<NUM>0[0-7]+)([ul]|ull?|ll?u|ll)\b",
-            r"\b(?P<NUM>0x[0-9a-f]+)([ul]|ull?|ll?u|ll)\b",
-        ]
         # remove integer literals type hint
-        for reg in REG_LITERALS:
-            for match in re.finditer(reg, token, re.IGNORECASE):
-                literal_integer = match.group(0)
-                number = match.group("NUM")
-                token = token.replace(literal_integer, number)
+        for re_reg in REG_LITERALS:
+            token = re_reg.sub(r"\1", token)
         # calculate size of special type
         # transform type cascading to bit mask for equivalence calculation
-        for sz_log2, special_type in enumerate(("U8", "U16", "U32", "U64")):
+        for data_sz, reg_sizeof_type, reg_special_type in zip(
+            [1, 2, 4, 8],
+            REG_SPECIAL_SIZEOFTYPES,
+            REG_SPECIAL_TYPES
+        ):
             # limitation:
             #   for equation like (U32)1 << (U32)(15) may be calculated to wrong value
             #   due to operator order
-            data_sz = 2**sz_log2
             # sizeof(U16) -> 2
-            token = re.sub(rf"sizeof\(\s*{special_type}\s*\)", str(data_sz), token)
+            token = reg_sizeof_type.sub(str(data_sz), token)
             # (U16)x -> 0xFFFF & x
-            token = re.sub(
-                rf"\(\s*{special_type}\s*\)", "0x" + "F" * data_sz * 2 + " & ", token
-            )
+            token = reg_special_type.sub(f"0x{'F' * data_sz * 2} & ", token)
+        # syntax translation from C -> Python
+        token = token.replace("/", "//")
+        token = token.replace("&&", " and ")
+        token = token.replace("||", " or ")
+        token = token.replace("!", " not ")
         try:
-            # syntax translation from C -> Python
-            token = token.replace("/", "//")
-            token = token.replace("&&", " and ")
-            token = token.replace("||", " or ")
-            token = token.replace("!", " not ")
             return int(eval(token))
         except:
             return None
@@ -147,9 +182,6 @@ class Parser:
         reserve_whitespace=False,
         include_block_comment=False,
     ):
-        regex_line_break = r"\\\s*$"
-        regex_line_comment = r"\s*\/\/.*$"
-
         if_depth = 0
         if_true_bmp = 1  # bitmap for every #if statement
         if_done_bmp = 1  # bitmap for every #if statement
@@ -158,6 +190,8 @@ class Parser:
         # with open(filepath, "r", errors="replace") as fs:
         multi_lines = ""
         for line_no, line in enumerate(fileio.readlines(), 1):
+            # if line_no == 140 and "/hal_qinfo.h" in fileio.name:
+            #     print(line_no)
 
             if not is_block_comment:
                 if "/*" in line:  # start of block comment
@@ -179,18 +213,15 @@ class Parser:
                         yield (line, line_no)
                     continue
 
-            line = re.sub(
-                regex_line_comment, "", self.strip_token(line, reserve_whitespace)
-            )
+            line = REGEX_SYNTAX_LINE_COMMENT.sub("", self.strip_token(line, reserve_whitespace))
 
             if try_if_else:
-                match_if = re.match(
-                    r"#if(?P<DEF>(?P<NOT>n*)def)*\s*(?P<TOKEN>.+)", line
-                )
-                match_elif = re.match(r"#elif\s*(?P<TOKEN>.+)", line)
-                match_else = re.match(r"#else.*", line)
-                match_endif = re.match(r"#endif.*", line)
+                match_if = REG_STATEMENT_IF.match(line)
+                match_elif = REG_STATEMENT_ELIF.match(line)
+                match_else = REG_STATEMENT_ELSE.match(line)
+                match_endif = REG_STATEMENT_ENDIF.match(line)
                 if match_if:
+                    # print(match_if.group(0), fileio.name, line_no)
                     if_depth += 1
                     token = match_if.group("TOKEN")
                     if match_if.group("DEF") is not None:
@@ -222,6 +253,7 @@ class Parser:
                         False if match_if.group("NOT") == "n" else first_guard_token
                     )
                 elif match_elif:
+                    # print(match_elif.group(0), fileio.name, line_no)
                     if_token = self.expand_token(
                         match_elif.group("TOKEN"),
                         try_if_else,
@@ -232,19 +264,22 @@ class Parser:
                     if_true_bmp |= BIT(if_depth) * if_token_val
                     if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
                 elif match_else:
+                    # print(match_else.group(0), fileio.name, line_no)
                     if_true_bmp ^= BIT(if_depth)  # toggle state
                     if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
                 elif match_endif:
+                    # print(match_endif.group(0), fileio.name, line_no)
                     if_true_bmp &= ~BIT(if_depth)
                     if_done_bmp &= ~BIT(if_depth)
+                    assert if_depth > 0
                     if_depth -= 1
 
-            multi_lines += re.sub(regex_line_break, "", line)
-            if re.search(regex_line_break, line):
+            multi_lines += REGEX_SYNTAX_LINE_BREAK.sub("", line)
+            if REGEX_SYNTAX_LINE_BREAK.search(line):
                 if reserve_whitespace:
                     yield (line, line_no)
                 continue
-            single_line = re.sub(regex_line_break, "", multi_lines)
+            single_line = REGEX_SYNTAX_LINE_BREAK.sub("", multi_lines)
             if if_true_bmp == BIT(if_depth + 1) - 1:
                 yield (single_line, line_no)
                 if_done_bmp |= BIT(if_depth)
@@ -253,14 +288,14 @@ class Parser:
             multi_lines = ""
 
     def _get_define(self, line, filepath="", lineno=0):
-        match = re.match(REGEX_UNDEF, line)
+        match = REGEX_UNDEF.match(line)
         if match is not None:
             name = match.group("NAME")
             if name in self.defs:
                 del self.defs[name]
             return
 
-        match = re.match(REGEX_DEFINE, line)
+        match = REGEX_DEFINE.match(line)
         if match == None:
             return
 
@@ -297,23 +332,19 @@ class Parser:
         header_done = set()
         pre_defined_keys = self.defs.keys()
 
-        def get_included_file(path, src_file):
-            path = os.path.normpath(path)
-            src_file = os.path.normpath(src_file)
+        def get_included_file(inc_path, src_file):
+            inc_path = os.path.normpath(inc_path)  # xxx/conf.h
+            src_file = os.path.normpath(src_file)  # C:/path/to/src.xxx.c
             included_files = [
                 h
                 for h in header_files
-                if path in h and os.path.basename(path) == os.path.basename(h)
+                if inc_path in h and os.path.basename(inc_path) == os.path.basename(h)
             ]
             if len(included_files) > 1:
-                included_files = [
-                    f for f in included_files if f.replace(path, "") in src_file
-                ]
+                included_files = [f for f in included_files if f.replace(inc_path, "") in src_file]
 
             if len(included_files) > 1:
-                raise DuplicatedIncludeError(
-                    pformat(included_files, indent=4, width=120)
-                )
+                raise DuplicatedIncludeError(pformat(included_files, indent=4, width=120))
 
             return included_files[0] if len(included_files) else None
 
@@ -324,7 +355,7 @@ class Parser:
             try:
                 with open(filepath, "r", errors="replace") as fs:
                     for line, lineno in self.read_file_lines(fs, try_if_else):
-                        match_include = re.match(REGEX_INCLUDE, line)
+                        match_include = REGEX_INCLUDE.match(line)
                         if match_include is not None:
                             # parse included file first
                             path = match_include.group("PATH")
@@ -406,10 +437,9 @@ class Parser:
             return []
 
         # remove string value in token
-        regex_str = r'"[^"]+"'
-        token = re.sub(regex_str, "", token)
+        token = REGEX_STRING.sub("", token)
 
-        tokens = list(re.finditer(REGEX_TOKEN, token))
+        tokens = list(REGEX_TOKEN.finditer(token))
         if len(tokens):
             ret_tokens = []
             for match in tokens:
@@ -478,8 +508,9 @@ class Parser:
                     new_params = list(self._iter_arg(params))
                     new_token = self.defs[name].token
                     # Expand the token
-                    for old_p, new_p in zip(old_params, new_params):
-                        new_token = re.sub(word_boundary(old_p), new_p, new_token)
+                    old_param_regs = (re.compile(word_boundary(x)) for x in old_params)
+                    for old_p_reg, new_p in zip(old_param_regs, new_params):
+                        new_token = old_p_reg.sub(new_p, new_token)
                     # expanded_token = expanded_token.replace(_token.line, new_token)
                     new_token_val = self.try_eval_num(new_token)
                     new_token = str(new_token_val) if new_token_val else new_token
