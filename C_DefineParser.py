@@ -5,6 +5,7 @@ import re
 import subprocess
 
 # import functools
+from argparse import ArgumentParser
 from collections import defaultdict, namedtuple
 from contextlib import contextmanager
 from pprint import pformat
@@ -25,6 +26,7 @@ REGEX_DEFINE = re.compile(
 REGEX_UNDEF = re.compile(r"#undef\s+" + REGEX_TOKEN.pattern)
 REGEX_INCLUDE = re.compile(r'#include\s+["<](?P<PATH>.+)[">]\s*')
 REGEX_STRING = re.compile(r'"[^"]+"')
+REGEX_OPERATOR_NOT = re.compile("!(?!=)")
 BIT = lambda n: 1 << n
 
 logger = logging.getLogger(os.path.basename(__name__))
@@ -168,7 +170,7 @@ class Parser:
         token = token.replace("/", "//")
         token = token.replace("&&", " and ")
         token = token.replace("||", " or ")
-        token = token.replace("!", " not ")
+        token = REGEX_OPERATOR_NOT.sub(" not ", token)
         try:
             return int(eval(token))
         except:
