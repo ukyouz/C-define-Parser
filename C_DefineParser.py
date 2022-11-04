@@ -334,16 +334,16 @@ class Parser:
         header_done = set()
         pre_defined_keys = self.defs.keys()
 
-        def get_included_file(inc_path, src_file):
+        def get_included_file(inc_path, ref_file):
             inc_path = os.path.normpath(inc_path)  # xxx/conf.h
-            src_file = os.path.normpath(src_file)  # C:/path/to/src.xxx.c
+            ref_file = os.path.normpath(ref_file)  # C:/path/to/src.xxx.h
             included_files = [
                 h
                 for h in header_files
                 if inc_path in h and os.path.basename(inc_path) == os.path.basename(h)
             ]
             if len(included_files) > 1:
-                included_files = [f for f in included_files if f.replace(inc_path, "") in src_file]
+                included_files = [f for f in included_files if f.replace(inc_path, "") in ref_file]
 
             if len(included_files) > 1:
                 raise DuplicatedIncludeError(pformat(included_files, indent=4, width=120))
@@ -361,7 +361,7 @@ class Parser:
                         if match_include is not None:
                             # parse included file first
                             path = match_include.group("PATH")
-                            included_file = get_included_file(path, src_file=filepath)
+                            included_file = get_included_file(path, filepath)
                             read_header(included_file)
                         define = self._get_define(line, filepath, lineno)
                         if define is None or define.name in pre_defined_keys:
