@@ -61,10 +61,10 @@ compile_flag_parser.add_argument("-I", "--include", action="append", nargs=1, me
 
 
 REG_LITERALS = [
-    re.compile(r"\b(?P<NUM>[0-9]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-    re.compile(r"\b(?P<NUM>0b[01]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-    re.compile(r"\b(?P<NUM>0[0-7]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-    re.compile(r"\b(?P<NUM>0x[0-9a-f]+)([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>[0-9]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>0b[01]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>0[0-7]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
+    re.compile(r"\b(?P<NUM>0x[0-9a-f]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
 ]
 
 REG_SPECIAL_SIZEOFTYPES = [
@@ -279,7 +279,8 @@ class Parser:
             multi_lines += REGEX_SYNTAX_LINE_BREAK.sub("", line)
             if REGEX_SYNTAX_LINE_BREAK.search(line):
                 if reserve_whitespace:
-                    yield (line, line_no)
+                    if if_true_bmp == BIT(if_depth + 1) - 1:
+                        yield (line, line_no)
                 continue
             single_line = REGEX_SYNTAX_LINE_BREAK.sub("", multi_lines)
             if if_true_bmp == BIT(if_depth + 1) - 1:
