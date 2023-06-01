@@ -237,7 +237,7 @@ class Parser:
                             else:
                                 defined_file = self.defs[if_token].file
                                 defined_line = self.defs[if_token].lineno
-                                if os.path.samefile(defined_file, fileio.name) and line_no < defined_line:
+                                if defined_file and os.path.samefile(defined_file, fileio.name) and line_no < defined_line:
                                     if_token_val = 0
                                 else:
                                     if_token_val = 1
@@ -542,7 +542,7 @@ class Parser:
 
         if expanded_token in self.defs:
             expanded_token = self.expand_token(
-                self.defs[token].token, try_if_else, raise_key_error, zero_undefined
+                self.defs[expanded_token].token, try_if_else, raise_key_error, zero_undefined
             )
 
             # try to eval the value, to reduce the bracket count
