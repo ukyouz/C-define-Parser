@@ -6,7 +6,7 @@ def parser_default():
 	parser = Parser()
 	inc_path = './samples'
 	parser.read_folder_h(inc_path)
-	assert parser.expand_token("ENV", try_if_else=True) == "0"
+	assert parser.expand_token("ENV") == "0"
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
@@ -43,7 +43,7 @@ def parser_public():
 	inc_path = './samples'
 	parser.insert_define('ENV', token='ENV_PUBLIC')
 	parser.read_folder_h(inc_path)
-	assert parser.expand_token("ENV", try_if_else=True) == "1"
+	assert parser.expand_token("ENV") == "1"
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
@@ -71,8 +71,8 @@ def test_define_pub(parser_public, define, expected_value):
 
 def test_stacks_pub(parser_public):
     def _compare(token1, token2):
-        a = parser_public.expand_token(token1, try_if_else=True)
-        b = parser_public.expand_token(token2, try_if_else=True)
+        a = parser_public.expand_token(token1)
+        b = parser_public.expand_token(token2)
         assert eval(a) == eval(b)
     _compare('NVME_IO_QUEUE0_BASE', 'NVME_IO_QUEUEN_BASE(0)')
     _compare('NVME_IO_QUEUE1_BASE', 'NVME_IO_QUEUEN_BASE(1)')
@@ -84,7 +84,7 @@ def test_stacks_pub(parser_public):
     _compare('NVME_IO_QUEUE7_BASE', 'NVME_IO_QUEUEN_BASE(7)')
 
 def test_existence_pub(parser_public):
-	define = parser_public.get_expand_define('BUFFER_1_BASE', try_if_else=True)
+	define = parser_public.get_expand_define('BUFFER_1_BASE')
 	assert define == None
 
 ################################################################################
@@ -94,8 +94,8 @@ def parser_test():
 	parser = Parser()
 	inc_path = './samples'
 	parser.insert_define('ENV', token='ENV_TEST')
-	parser.read_folder_h(inc_path, try_if_else=True)
-	assert parser.expand_token("ENV", try_if_else=True) == "3"
+	parser.read_folder_h(inc_path)
+	assert parser.expand_token("ENV") == "3"
 	return parser
 
 @pytest.mark.parametrize("token, expected_value", [
@@ -107,14 +107,14 @@ def parser_test():
 	('(ALIGN_2N(BUFFER_BASE, BUFFER_ALIGN_SHIFT))', 0x4000000),
 ])
 def test_token_test(parser_test, token, expected_value):
-	token = parser_test.expand_token(token, try_if_else=True)
+	token = parser_test.expand_token(token)
 	value = eval(token)
 	assert value == expected_value
 
 def test_stacks_test(parser_test):
     def _compare(token1, token2):
-        a = parser_test.expand_token(token1, try_if_else=True)
-        b = parser_test.expand_token(token2, try_if_else=True)
+        a = parser_test.expand_token(token1)
+        b = parser_test.expand_token(token2)
         assert eval(a) == eval(b)
     _compare('NVME_IO_QUEUE0_BASE', 'NVME_IO_QUEUEN_BASE(0)')
     _compare('NVME_IO_QUEUE1_BASE', 'NVME_IO_QUEUEN_BASE(1)')
@@ -137,6 +137,6 @@ def test_define_test(parser_test, define, expected_value):
 	assert value == expected_value
 
 def test_existence_test(parser_test):
-	define = parser_test.get_expand_define('BUFFER_1_BASE', try_if_else=True)
+	define = parser_test.get_expand_define('BUFFER_1_BASE')
 	assert define == None
 
