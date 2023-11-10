@@ -177,7 +177,7 @@ class Parser:
             raise KeyError("token '{}' is not defined!".format(name))
 
     def strip_token(self, token, reserve_whitespace=False) -> str:
-        assert isinstance(token, str)
+        assert isinstance(token, str), "`token` type shall belong to str"
         if reserve_whitespace:
             token = token.rstrip()
         else:
@@ -325,7 +325,7 @@ class Parser:
                     if_true_bmp &= ~BIT(if_depth)
                     if_done_bmp &= ~BIT(if_depth)
                     if len(captured_ifs) > 1:
-                        assert if_depth > 0, "{}#{}".format(fileio.name, line_no)
+                        assert if_depth > 0, "{}#{} #endif with less #if directive.".format(fileio.name, line_no)
                     else:
                         # some source files may tend to leave an extra #endif at the end
                         # I think it is for unintentionally include, so just warn and let it go.
@@ -553,7 +553,7 @@ class Parser:
     def _iter_arg(self, params):
         if len(params) == 0:
             return []
-        assert params[0] == "(" and params[-1] == ")"
+        assert params[0] == "(" and params[-1] == ")", "`params` shall be like '(...)'"
         parma_list = params[1:-1].split(",")
         arguments = []
         for arg in parma_list:
