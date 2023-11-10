@@ -21,3 +21,35 @@ You can get a result like:
 ```
 
 Because C-define Parser can find the defines of `BASE_X` and `X_SIZE` and the defines they used, and on, and on, and on, and finally export a number for you, then you can control the output format as you like.
+
+# Installation
+
+`pip install git+https://github.com/ukyouz/C-define-Parser`
+
+# Usage
+
+To parse all header files in your source folder:
+
+```python
+import C_DefineParser
+
+p = C_DefineParser.Parser()
+p.read_folder_h("./samples")
+```
+
+Then you can get parsed definitions in a header file.
+
+```python
+defines = p.get_expand_defines("./samples/address_map.h")
+# [C_DefineParser.Define(...), ...]
+
+# try to eval the expaned token as a single value
+val = p.try_eval_num(defines[0].token)
+```
+
+Or just get an expanded macro token:
+
+```python
+define = p.get_expand_defines("BIT(31)")
+# C_DefineParser.Define(...)
+```
