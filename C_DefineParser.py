@@ -459,11 +459,11 @@ class Parser:
     @contextmanager
     def read_c(self, filepath, try_if_else=False):
         """use `with` context manager for having temporary tokens defined in .c source file"""
-        defs = {}
+        temp_defs = {}  # use dict to uniqify define name
         try:
             add_includes = Path(filepath).resolve() not in self.include_trees
             with open(filepath, "r", errors="replace") as fs:
-                for line, _ in self.read_file_lines(fs, try_if_else):
+                for line, line_no in self.read_file_lines(fs, try_if_else):
                     if add_includes:
                         match_include = REGEX_INCLUDE.match(line)
                         if match_include is not None:
@@ -475,18 +475,22 @@ class Parser:
                                     IncludeHeader(path, Path(included_file).resolve())
                                 )
                             continue
-                    define = self._get_define(line)
+                    define = self._get_define(line, filepath, line_no)
                     if define == None:
+                        continue
+                    if define.name in self.defs:
                         continue
                     # if len(define.params):
                     #     return
-                    defs[define.name] = define
+                    temp_defs[define.name] = define
 
-            for define in defs.values():
+            for define in temp_defs.values():
                 self.insert_define(
                     name=define.name,
                     params=define.params,
                     token=define.token,
+                    filename=define.file,
+                    lineno=define.lineno,
                 )
 
             yield
@@ -494,7 +498,7 @@ class Parser:
         except UnicodeDecodeError as e:
             print(f"Fail to open :{filepath}. {e}")
         finally:
-            for define in defs.values():
+            for define in temp_defs.values():
                 del self.defs[define.name]
 
     def _find_token_params(self, params) -> str:
