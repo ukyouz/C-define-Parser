@@ -34,14 +34,12 @@ BIT = lambda n: 1 << n
 logger = logging.getLogger(os.path.basename(__name__))
 
 
-def glob_recursive(directory, ext=".c"):
-    logger.debug("glob **/*%s --recursieve", ext)
-    return [
-        os.path.join(root, filename)
-        for root, _, filenames in os.walk(directory)
-        for filename in filenames
-        if filename.endswith(ext)
-    ]
+def glob_recursive(directory, exts=[".c", ".cpp"]):
+    logger.debug("glob **/*.{%s} --recursieve", exts)
+    files = set()
+    for ext in exts:
+        files |= set(Path(directory).rglob("*.%s" % ext))
+    return list(files)
 
 
 def is_git(folder):
@@ -50,7 +48,7 @@ def is_git(folder):
     return len(markers & files)
 
 
-def git_lsfiles(directory, ext=".h"):
+def git_lsfiles(directory, exts=[".h", ".H"]):
     git_cmds = ["git", "--git-dir", os.path.join(directory, ".git"), "ls-files"]
     logger.debug(" ".join(git_cmds))
     try:
@@ -60,16 +58,15 @@ def git_lsfiles(directory, ext=".h"):
         )
     except subprocess.CalledProcessError:
         # fallback to normal glob if git command fail
-        return glob_recursive(directory, ext)
+        return glob_recursive(directory, exts)
     except FileNotFoundError:
         # fallback to normal glob if git command fail
-        return glob_recursive(directory, ext)
+        return glob_recursive(directory, exts)
 
+    folder = Path(directory)
     filelist = filelist_output.decode().split("\n")
-    filelist = [
-        os.path.join(directory, filename) for filename in filelist if filename.endswith(ext)
-    ]
-    return [f for f in filelist if os.path.exists(f)]
+    filelist = [folder / filename for filename in filelist]
+    return [f for f in filelist if f.suffix in exts]
 
 
 compile_flag_parser = ArgumentParser()
@@ -399,13 +396,13 @@ class Parser:
         else:
             return None
 
-    def read_folder_h(self, directory, try_if_else=True):
+    def read_folder_h(self, directory, try_if_else=True, exts="h,H"):
         self.folder = directory
 
         if is_git(directory):
-            header_files = git_lsfiles(directory, ".h")
+            header_files = git_lsfiles(directory, exts)
         else:
-            header_files = glob_recursive(directory, ".h")
+            header_files = glob_recursive(directory, exts)
         self.header_files = [os.path.normpath(f) for f in header_files]
         logger.debug("read_header cnt: %d", len(header_files))
 
