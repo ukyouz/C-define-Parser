@@ -256,7 +256,7 @@ class Parser:
                     if if_true_bmp == BIT(if_depth + 1) - 1:
                         yield (line, line_no)
                 continue
-            single_line = multi_lines
+            single_line = REGEX_SYNTAX_LINE_COMMENT.sub("", multi_lines)
             multi_lines = ""
 
             if try_if_else:
