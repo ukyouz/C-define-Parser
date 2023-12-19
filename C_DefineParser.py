@@ -504,6 +504,29 @@ class Parser:
             for name, define in temp_overwrite.items():
                 self.defs[name] = define
 
+    def load_compile_flags(self, compile_flag_txt: str=""):
+        if compile_flag_txt == "":
+            return
+
+        arguments = [x.strip() for x in compile_flag_txt.split(" ") if x]
+
+        predefines = []
+        for arg in arguments:
+            if not arg.startswith("-D"):
+                continue
+
+            pair = tuple(arg[2:].split("="))
+            if len(pair) == 1:
+                # ie: -DDEBUG
+                predefines.append((pair[0], 0))
+            elif len(pair) == 2:
+                # ie: -DDEBUG=0
+                predefines.append(pair)
+
+        for d in predefines:
+            print("  predefine: {!r}".format(d))
+            self.insert_define(d[0], token=d[1])
+
     def _find_token_params(self, params) -> str:
         if len(params) and params[0] != "(":
             return ""
