@@ -1,4 +1,5 @@
 import logging
+import io
 import os
 import re
 import subprocess
@@ -9,7 +10,10 @@ from collections import Counter, defaultdict, namedtuple
 from contextlib import contextmanager
 from pathlib import Path
 from pprint import pformat
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Iterable
+
+from utils.txt_op import remove_comment
+
 
 Define = namedtuple(
     "Define",
@@ -99,8 +103,7 @@ REG_STATEMENT_ELIF = re.compile(r"\s*#\s*elif\s*(?P<TOKEN>.+)")
 REG_STATEMENT_ELSE = re.compile(r"\s*#\s*else.*")
 REG_STATEMENT_ENDIF = re.compile(r"\s*#\s*endif.*")
 
-REGEX_SYNTAX_LINE_COMMENT = re.compile(r"\s*\/\/.*$")
-REGEX_SYNTAX_INLINE_COMMENT = re.compile(r"\/\*.*\*\/")
+
 REGEX_SYNTAX_LINE_BREAK = re.compile(r"\\\s*$")
 
 REGEX_MACRO_HASH_OP = re.compile(r"\s*#\s*(?P<ARG>[^\s]+)")
@@ -116,6 +119,7 @@ def get_include_paths(direcotry):
         args = compile_flag_parser.parse_args(flags)
         include_paths = sorted(args.include, key=len)
         print(include_paths)
+
 
 
 class DuplicatedIncludeError(Exception):
@@ -198,7 +202,6 @@ class Parser:
             token = token.rstrip()
         else:
             token = token.strip()
-        token = REGEX_SYNTAX_INLINE_COMMENT.sub("", token)
         return token
 
     def try_eval_num(self, token):
@@ -233,11 +236,8 @@ class Parser:
         try_if_else=True,
         ignore_header_guard=False,
         reserve_whitespace=False,
-        include_block_comment=False,
     ):
         first_guard_token = True
-        is_block_comment = False
-        multi_lines = ""
 
         captured_ifs: list[CodeActiveState] = []
         def is_active(single_line: str = "") -> bool:
@@ -306,29 +306,11 @@ class Parser:
                 return True
             return all(bool(active) for active in captured_ifs)
 
-        for line_no, line in enumerate(fileio.readlines(), 1):
+        merged_line = ""
+        clean_code = remove_comment(fileio.readlines())
+        for line_no, line in enumerate(clean_code, 1):
 
-            if not is_block_comment:
-                if "/*" in line:  # start of block comment
-                    block_comment_start = line.index("/*")
-                    is_block_comment = "*/" not in line
-                    block_comment_ending = (
-                        line.index("*/") + 2 if not is_block_comment else len(line)
-                    )
-                    line = line[:block_comment_start] + line[block_comment_ending:]
-                    if is_block_comment:
-                        multi_lines += line
-
-            if is_block_comment:
-                if "*/" in line:  # end of block comment
-                    line = line[line.index("*/") + 2 :]
-                    is_block_comment = False
-                else:
-                    if include_block_comment:
-                        yield (line, line_no)
-                    continue
-
-            multi_lines += REGEX_SYNTAX_LINE_BREAK.sub(
+            merged_line += REGEX_SYNTAX_LINE_BREAK.sub(
                 " ",
                 self.strip_token(line, reserve_whitespace),
             )
@@ -337,11 +319,11 @@ class Parser:
                     if is_active():
                         yield (line, line_no)
                 continue
-            single_line = REGEX_SYNTAX_LINE_COMMENT.sub("", multi_lines)
-            multi_lines = ""
 
-            if is_active(single_line):
-                yield (single_line, line_no)
+            if is_active(merged_line):
+                yield (merged_line, line_no)
+    
+            merged_line = ""
 
     def _get_define(self, line, filepath="", lineno=0):
         match = REGEX_UNDEF.match(line)
