@@ -64,6 +64,7 @@ REG_SPECIAL_TYPES = [
     re.compile(r"\(\s*U64\s*\)"),
 ]
 REGEX_OPERATOR_NOT = re.compile(r"!([^=])")
+REGEX_CHAR = re.compile(r"'([ -~])'")
 
 def convert_op_c2py(txt: str) -> str:
     # remove integer literals type hint
@@ -86,5 +87,46 @@ def convert_op_c2py(txt: str) -> str:
     txt = txt.replace("&&", " and ")
     txt = txt.replace("||", " or ")
     txt = REGEX_OPERATOR_NOT.sub(" not \1", txt)
+    for char in REGEX_CHAR.finditer(txt):
+        txt = txt.replace(char.group(), str(ord(char[1])))
     return txt
 
+
+def get_token_param_str(params) -> str:
+    """return '(xx, xx, xx, ...)' """
+    if len(params) and params[0] != "(":
+        return ""
+    # (() ())
+    brackets = 0
+    new_params = ""
+    for c in params:
+        brackets += (c == "(") * 1 + (c == ")") * -1
+        new_params += c
+        if brackets == 0:
+            break
+    return new_params
+
+
+def _has_paired_parentheses(txt: str) -> bool:
+    lparan_cnt = 0
+    rparan_cnt = 0
+    for char in txt:
+        if char == "(":
+            lparan_cnt += 1
+        if char == ")":
+            rparan_cnt += 1
+    return lparan_cnt == rparan_cnt
+
+
+def iter_arguments(params):
+    if len(params) == 0:
+        return []
+    assert params[0] == "(" and params[-1] == ")", "`params` shall be like '(...)'"
+    parma_list = params[1:-1].split(",")
+    arguments = []
+    for arg in parma_list:
+        arguments.append(arg.strip())
+        param_str = ",".join(arguments)
+        if param_str and _has_paired_parentheses(param_str):
+            yield param_str
+            arguments = []

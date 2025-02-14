@@ -1,5 +1,4 @@
 import logging
-import io
 import os
 import re
 import subprocess
@@ -12,7 +11,7 @@ from pathlib import Path
 from pprint import pformat
 from typing import List, NamedTuple
 
-from utils.txt_op import remove_comment, convert_op_c2py
+from utils.txt_op import remove_comment, convert_op_c2py, get_token_param_str, iter_arguments
 
 
 Define = namedtuple(
@@ -21,7 +20,8 @@ Define = namedtuple(
 )
 Token = namedtuple("Token", ("name", "params", "line", "span"))
 
-WORD_BOUNDARY = lambda word: r"\b(\s*##\s*)?%s\b" % re.escape(word)
+def WORD_BOUNDARY(word):
+    return r"\b(\s*##\s*)?%s\b" % re.escape(word)
 
 REGEX_TOKEN = re.compile(r"\b(?P<NAME>[a-zA-Z_][a-zA-Z0-9_]+)\b")
 REGEX_DEFINE = re.compile(
@@ -36,10 +36,11 @@ REGEX_STRING = re.compile(r'"[^"]+"')
 logger = logging.getLogger(os.path.basename(__name__))
 
 
-def glob_recursive(directory, exts=[".c", ".cpp"]):
+def glob_recursive(directory, exts=None):
+    exts = exts or [".h", ".H"]
     logger.debug("glob **/*.{%s} --recursieve", exts)
     files = set()
-    for ext in exts:
+    for ext in exts.split(","):
         files |= set(Path(directory).rglob("*.%s" % ext))
     return list(files)
 
@@ -50,7 +51,8 @@ def is_git(folder):
     return len(markers & files)
 
 
-def git_lsfiles(directory, exts=[".h", ".H"]):
+def git_lsfiles(directory, exts=None):
+    exts = exts or [".h", ".H"]
     git_cmds = ["git", "--git-dir", os.path.join(directory, ".git"), "ls-files"]
     logger.debug(" ".join(git_cmds))
     try:
@@ -79,8 +81,8 @@ REG_STATEMENT_IF = re.compile(r"\s*#\s*if(\s+|\b)(?P<TOKEN>.+)")
 REG_STATEMENT_IFDEF = re.compile(r"\s*#\s*ifdef(\s+|\b)(?P<TOKEN>.+)")
 REG_STATEMENT_IFNDEF = re.compile(r"\s*#\s*ifndef(\s+|\b)(?P<TOKEN>.+)")
 REG_STATEMENT_ELIF = re.compile(r"\s*#\s*elif(\s+|\b)(?P<TOKEN>.+)")
-REG_STATEMENT_ELSE = re.compile(r"\s*#\s*else.*")
-REG_STATEMENT_ENDIF = re.compile(r"\s*#\s*endif.*")
+REG_STATEMENT_ELSE = re.compile(r"\s*#\s*else")
+REG_STATEMENT_ENDIF = re.compile(r"\s*#\s*endif")
 
 
 REGEX_SYNTAX_LINE_BREAK = re.compile(r"\\\s*$")
@@ -146,11 +148,14 @@ class CDefineEnv:
             code = "%s = %s" % (define.name, convert_op_c2py(define.token))
             self.add_expr(code)
         else:
-            code = "%s = lambda %s: %s" % (define.name, ",".join(define.params), define.token)
+            code = "def %s(%s): return %s" % (define.name, ",".join(define.params), define.token)
             self.add_expr(code)
 
     def del_name(self, name):
-        exec("del %s" % name, self._globals)
+        try:
+            exec("del %s" % name, self._globals)
+        except NameError:
+            pass
 
     def try_eval_num(self, token):
         token = convert_op_c2py(token)
@@ -158,6 +163,17 @@ class CDefineEnv:
             return int(eval(token, self._globals))
         except:
             return None
+    
+    def stringify_token(self, line: str, old_params: list = None) -> str:
+        expanded_token = line
+        for mark_match in REGEX_MACRO_HASH_OP.finditer(line):
+            # ie: #define stringify(var)    #var
+            arg = mark_match.group("ARG")
+            if old_params and arg not in old_params:
+                raise SyntaxError("'#' is not followed by a macro parameter, got: %r" % arg)
+            expanded_token = mark_match.re.sub('"%s"' % arg, expanded_token)
+
+        return expanded_token
 
 
 def has_defined(define: Define, curr_file, curr_line):
@@ -171,6 +187,95 @@ def has_defined(define: Define, curr_file, curr_line):
         return False
     else:
         return True
+
+
+def _arguments_expansion(cdef: CDefineEnv, define: Define, t: Token, check=False) -> str:
+    old_params = define.params or []
+    new_params = list(iter_arguments(t.params or ""))
+    variadic_pos = old_params.index("...") if "..." in old_params else -1
+
+    if check and variadic_pos == -1 and len(old_params) != len(new_params):
+        raise SyntaxError(
+            "macro {!r} requires {} arguments, but {} given: {!r}".format(
+                t.name, len(old_params), len(new_params), t.params
+            )
+        )
+
+    if variadic_pos >= 0:
+        if len(old_params) - 1 <= len(new_params):
+            old_params = old_params[:variadic_pos]
+        else:
+            raise SyntaxError(
+                "macro {!r} requires at least {} arguments, but {} given: {!r}".format(
+                    t.name, len(old_params) - 1, len(new_params), t.params
+                )
+            )
+
+    new_token = define.token
+    old_param_regs = (re.compile(WORD_BOUNDARY(x)) for x in old_params)
+    for old_p_reg, new_p in zip(old_param_regs, new_params):
+        new_token = old_p_reg.sub(new_p, new_token)
+
+    if variadic_pos >= 0 and len(new_params) >= variadic_pos:
+        if REGEX_MACRO_VA_ARGS.search(new_token):
+            """
+            #define LOG(msg, ...)  printf(msg, __VA_ARGS__)
+            #define LOG2(msg, ...)  printf(msg, ## __VA_ARGS__)
+
+            LOG("xx")        ->  printf("xx", )
+            LOG("xx", 123)   ->  printf("xx", 123)
+            LOG2("xx")       ->  printf("xx")
+            LOG2("xx", 123)  ->  printf("xx", 123)
+            """
+            new_param_txt = ",".join(new_params[variadic_pos:])
+
+            new_token = REGEX_MACRO_VA_ARGS.sub(
+                (r"\g<1>" if new_param_txt else "") + new_param_txt,
+                new_token,
+            )
+
+    new_token = re.sub(r"\s*##\s*", "", new_token)
+    if new_token_val := cdef.try_eval_num(new_token):
+        return str(new_token_val)
+    else:
+        return new_token
+
+
+def _argument_replacement(t: Token, new_token: str, line: str):
+    # Replace original line with new parameterized-token
+    expanded_token = line
+    if t.line == t.name:
+        expanded_token = re.sub(WORD_BOUNDARY(t.line), new_token, expanded_token)
+    else:
+        expanded_token = expanded_token.replace(t.line, new_token)
+
+    return expanded_token
+
+
+def _search_included_file(header_files: list, inc_path, src_file):
+    inc_path = os.path.normpath(inc_path)  # xxx/conf.h
+    src_file = os.path.normpath(src_file)  # C:/path/to/src.xxx.c
+    included_files = [
+        h
+        for h in header_files
+        if inc_path in h and os.path.basename(inc_path) == os.path.basename(h)
+    ]
+    if len(included_files) > 1:
+        included_files = [f for f in included_files if f.replace(inc_path, "") in src_file]
+
+    if len(included_files) == 0:
+        return None
+
+    relativities = [(len(os.path.commonpath([f, src_file])), f) for f in included_files]
+    relativities.sort(key=lambda x: x[0], reverse=True)
+    counter = Counter([x[0] for x in relativities])
+    if counter[relativities[0][0]] > 1:
+        raise DuplicatedIncludeError(pformat(included_files, indent=4, width=120))
+
+    if len(included_files):
+        return included_files[0]
+    else:
+        return None
 
 
 class Parser:
@@ -214,14 +319,6 @@ class Parser:
         else:
             raise KeyError("token '{}' is not defined!".format(name))
 
-    def strip_token(self, token, reserve_whitespace=False) -> str:
-        assert isinstance(token, str), "`token` type shall belong to str"
-        if reserve_whitespace:
-            token = token.rstrip()
-        else:
-            token = token.strip()
-        return token
-
     def read_file_lines(
         self,
         fileio,
@@ -231,9 +328,6 @@ class Parser:
     ):
         captured_ifs: list[CodeActiveState] = []
         def is_active(single_line: str = "") -> bool:
-            if not try_if_else:
-                return True
-
             match_if = REG_STATEMENT_IF.match(single_line)
             match_ifdef = REG_STATEMENT_IFDEF.match(single_line)
             match_ifndef = REG_STATEMENT_IFNDEF.match(single_line)
@@ -241,10 +335,8 @@ class Parser:
             match_else = REG_STATEMENT_ELSE.match(single_line)
             match_endif = REG_STATEMENT_ENDIF.match(single_line)
             if match_if:
-                token = match_if.group("TOKEN")
-                if_token = self.expand_token(token, zero_undefined=True)
-                if_token_val = self.cdef.try_eval_num(if_token)
-                captured_ifs.append(CodeActiveState(if_token_val))
+                if_token_val = self.expand_token(match_if.group("TOKEN"))
+                captured_ifs.append(CodeActiveState(self.cdef.try_eval_num(if_token_val)))
             elif match_ifdef:
                 check_name = match_ifdef.group("TOKEN").rstrip()
                 if check_name in self.defs:
@@ -263,11 +355,8 @@ class Parser:
                         has_def = False
                     captured_ifs.append(CodeActiveState(not has_def))
             elif match_elif:
-                if_token = self.expand_token(
-                    match_elif.group("TOKEN"),
-                    zero_undefined=True,
-                )
-                captured_ifs[-1].meet_elif(self.cdef.try_eval_num(if_token))
+                if_token_val = self.expand_token(match_elif.group("TOKEN"))
+                captured_ifs[-1].meet_elif(self.cdef.try_eval_num(if_token_val))
             elif match_else:
                 captured_ifs[-1].meet_else()
             elif match_endif:
@@ -287,22 +376,19 @@ class Parser:
         clean_code = remove_comment(fileio.readlines())
         for line_no, line in enumerate(clean_code, 1):
 
-            merged_line += REGEX_SYNTAX_LINE_BREAK.sub(
-                " ",
-                self.strip_token(line, reserve_whitespace),
-            )
+            merged_line += REGEX_SYNTAX_LINE_BREAK.sub(" ", line.strip())
             if REGEX_SYNTAX_LINE_BREAK.search(line):
                 if reserve_whitespace:
                     if is_active():
                         yield (line, line_no)
                 continue
 
-            if is_active(merged_line):
+            if not try_if_else or is_active(merged_line):
                 yield (merged_line, line_no)
     
             merged_line = ""
 
-    def _get_define(self, line, filepath="", lineno=0):
+    def _do_define_directive(self, line, filepath="", lineno=0) -> Define | None:
         match = REGEX_UNDEF.match(line)
         if match is not None:
             name = match.group("NAME")
@@ -312,7 +398,7 @@ class Parser:
             return
 
         match = REGEX_DEFINE.match(line)
-        if match == None:
+        if match is None:
             return
 
         name = match.group("NAME")
@@ -320,7 +406,7 @@ class Parser:
         params = match.group("PARAMS")
         param_list = [p.strip() for p in params.split(",")] if params else []
         match_token = match.group("TOKEN") or ""
-        token = self.strip_token(match_token) or "(1)"
+        token = match_token.strip() or "(1)"
 
         """
         #define AAA     // params = None
@@ -337,32 +423,8 @@ class Parser:
             lineno=lineno,
         )
 
-    def _search_included_file(self, inc_path, src_file):
-        inc_path = os.path.normpath(inc_path)  # xxx/conf.h
-        src_file = os.path.normpath(src_file)  # C:/path/to/src.xxx.c
-        included_files = [
-            h
-            for h in self.header_files
-            if inc_path in h and os.path.basename(inc_path) == os.path.basename(h)
-        ]
-        if len(included_files) > 1:
-            included_files = [f for f in included_files if f.replace(inc_path, "") in src_file]
-
-        if len(included_files) == 0:
-            return None
-
-        relativities = [(len(os.path.commonpath([f, src_file])), f) for f in included_files]
-        relativities.sort(key=lambda x: x[0], reverse=True)
-        counter = Counter([x[0] for x in relativities])
-        if counter[relativities[0][0]] > 1:
-            raise DuplicatedIncludeError(pformat(included_files, indent=4, width=120))
-
-        if len(included_files):
-            return included_files[0]
-        else:
-            return None
-
-    def read_folder_h(self, directory, try_if_else=True, exts="h,H"):
+    def read_folder_h(self, directory, try_if_else=True, exts=None):
+        exts = exts or [".h", ".H"]
         self.folder = directory
 
         if is_git(directory):
@@ -378,6 +440,7 @@ class Parser:
         def read_header(filepath):
             if filepath is None or filepath in header_done:
                 return
+            header_done.add(filepath)
 
             try:
                 with open(filepath, "r", errors="replace") as fs:
@@ -386,14 +449,14 @@ class Parser:
                         if match_include is not None:
                             # parse included file first
                             path = match_include.group("PATH")
-                            if included_file := self._search_included_file(
-                                path, src_file=filepath
+                            if included_file := _search_included_file(
+                                self.header_files, path, src_file=filepath
                             ):
                                 self.include_trees[Path(filepath).resolve()].append(
                                     IncludeHeader(path, Path(included_file).resolve())
                                 )
                                 read_header(included_file)
-                        define = self._get_define(line, filepath, lineno)
+                        define = self._do_define_directive(line, filepath, lineno)
                         if define is None or define.name in pre_defined_keys:
                             continue
                         self._insert_define(define)
@@ -401,23 +464,23 @@ class Parser:
             except UnicodeDecodeError as e:
                 logger.warning("Fail to open {!r}. {}".format(filepath, e))
 
-            header_done.add(filepath)
-
         for header_file in header_files:
             read_header(header_file)
 
         return True
 
+    @contextmanager
     def read_h(self, filepath, try_if_else=False):
         try:
             with open(filepath, "r", errors="replace") as fs:
                 for line, _ in self.read_file_lines(fs, try_if_else):
-                    define = self._get_define(line)
-                    if define == None:
+                    define = self._do_define_directive(line)
+                    if define is None:
                         continue
                     # if len(define.params):
                     #     return
                     self._insert_define(define)
+            yield
         except UnicodeDecodeError as e:
             print(f"Fail to open :{filepath}. {e}")
 
@@ -434,15 +497,15 @@ class Parser:
                         match_include = REGEX_INCLUDE.match(line)
                         if match_include is not None:
                             path = match_include.group("PATH")
-                            if included_file := self._search_included_file(
-                                path, src_file=filepath
+                            if included_file := _search_included_file(
+                                self.header_files, path, src_file=filepath
                             ):
                                 self.include_trees[Path(filepath).resolve()].append(
                                     IncludeHeader(path, Path(included_file).resolve())
                                 )
                             continue
-                    define = self._get_define(line, filepath, line_no)
-                    if define == None:
+                    define = self._do_define_directive(line, filepath, line_no)
+                    if define is None:
                         continue
                     # if len(define.params):
                     #     return
@@ -488,19 +551,6 @@ class Parser:
             print("  predefine: {!r}".format(d))
             self.insert_define(d[0], token=d[1])
 
-    def _find_token_params(self, params) -> str:
-        if len(params) and params[0] != "(":
-            return ""
-        # (() ())
-        brackets = 0
-        new_params = ""
-        for c in params:
-            brackets += (c == "(") * 1 + (c == ")") * -1
-            new_params += c
-            if brackets == 0:
-                break
-        return new_params
-
     def find_tokens(self, token) -> list[Token]:
 
         # remove string value in token
@@ -516,11 +566,11 @@ class Parser:
                 _token = match.group("NAME")
                 params = None
                 if _token in self.defs and self.defs[_token].params is not None:
-                    params = self._find_token_params(token[match.end() :])
+                    params = get_token_param_str(token[match.end() :])
                 elif match.end() < len(token) and token[match.end()] == "(":
                     # to suppress error message:
                     # <string>:1: SyntaxWarning: 'int' object is not callable; perhaps you missed a comma?
-                    params = self._find_token_params(token[match.end() :])
+                    params = get_token_param_str(token[match.end() :])
                 param_str = params if params else ""
                 ret_tokens.append(
                     Token(
@@ -531,101 +581,6 @@ class Parser:
         else:
             return []
 
-    def _check_parentheses(self, token):
-        lparan_cnt = 0
-        rparan_cnt = 0
-        for char in token:
-            if char == "(":
-                lparan_cnt += 1
-            if char == ")":
-                rparan_cnt += 1
-        return lparan_cnt == rparan_cnt
-
-    def _iter_arg(self, params):
-        if len(params) == 0:
-            return []
-        assert params[0] == "(" and params[-1] == ")", "`params` shall be like '(...)'"
-        parma_list = params[1:-1].split(",")
-        arguments = []
-        for arg in parma_list:
-            arguments.append(arg.strip())
-            prams_str = ",".join(arguments)
-            if prams_str and self._check_parentheses(prams_str):
-                yield prams_str
-                arguments = []
-
-    def _arguments_expansion(self, define: Define, t: Token, check=False) -> str:
-        old_params = define.params or []
-        new_params = list(self._iter_arg(t.params or ""))
-        variadic_pos = old_params.index("...") if "..." in old_params else -1
-
-        if check and variadic_pos == -1 and len(old_params) != len(new_params):
-            raise SyntaxError(
-                "macro {!r} requires {} arguments, but {} given: {!r}".format(
-                    t.name, len(old_params), len(new_params), t.params
-                )
-            )
-
-        if variadic_pos >= 0:
-            if len(old_params) - 1 <= len(new_params):
-                old_params = old_params[:variadic_pos]
-            else:
-                raise SyntaxError(
-                    "macro {!r} requires at least {} arguments, but {} given: {!r}".format(
-                        t.name, len(old_params) - 1, len(new_params), t.params
-                    )
-                )
-
-        new_token = define.token
-        old_param_regs = (re.compile(WORD_BOUNDARY(x)) for x in old_params)
-        for old_p_reg, new_p in zip(old_param_regs, new_params):
-            new_token = old_p_reg.sub(new_p, new_token)
-
-        if variadic_pos >= 0 and len(new_params) >= variadic_pos:
-            if REGEX_MACRO_VA_ARGS.search(new_token):
-                """
-                #define LOG(msg, ...)  printf(msg, __VA_ARGS__)
-                #define LOG2(msg, ...)  printf(msg, ## __VA_ARGS__)
-
-                LOG("xx")        ->  printf("xx", )
-                LOG("xx", 123)   ->  printf("xx", 123)
-                LOG2("xx")       ->  printf("xx")
-                LOG2("xx", 123)  ->  printf("xx", 123)
-                """
-                new_param_txt = ",".join(new_params[variadic_pos:])
-
-                new_token = REGEX_MACRO_VA_ARGS.sub(
-                    (r"\g<1>" if new_param_txt else "") + new_param_txt,
-                    new_token,
-                )
-
-        new_token = re.sub(r"\s*##\s*", "", new_token)
-        if new_token_val := self.cdef.try_eval_num(new_token):
-            return str(new_token_val)
-        else:
-            return new_token
-
-    def _argument_replacement(self, t: Token, new_token: str, line: str):
-        # Replace original line with new parameterized-token
-        expanded_token = line
-        if t.line == t.name:
-            expanded_token = re.sub(WORD_BOUNDARY(t.line), new_token, expanded_token)
-        else:
-            expanded_token = expanded_token.replace(t.line, new_token)
-
-        return expanded_token
-
-    def _stringify_token(self, line: str, old_params: list = None) -> str:
-        expanded_token = line
-        for mark_match in REGEX_MACRO_HASH_OP.finditer(line):
-            # ie: #define stringify(var)    #var
-            arg = mark_match.group("ARG")
-            if old_params and arg not in old_params:
-                raise SyntaxError("'#' is not followed by a macro parameter, got: %r" % arg)
-            expanded_token = mark_match.re.sub('"%s"' % arg, expanded_token)
-
-        return expanded_token
-
     def expand_token(self, token: str, zero_undefined=False):
 
         token_val = self.cdef.try_eval_num(token)
@@ -635,7 +590,7 @@ class Parser:
         total_seen = set()
 
         def _expand_token(_token: str, avoid_recursion_set: set):
-            expanded_token = self.strip_token(_token)
+            expanded_token = _token.strip()
             simple_tokens = [t for t in self.find_tokens(expanded_token) if not t.params]
             """
             token    token    token
@@ -651,12 +606,12 @@ class Parser:
                     if not define.params:
                         # TODO: shall check `if define.params is not None`
                         # but hang in unittest, don't know why
-                        new_token = self._arguments_expansion(define, _t, False)
+                        new_token = _arguments_expansion(self.cdef, define, _t, False)
                         token_seen.add(_t.name)
                         new_token = _expand_token(new_token, token_seen)
                         token_seen.remove(_t.name)
 
-                        expanded_token = self._argument_replacement(
+                        expanded_token = _argument_replacement(
                             _t, new_token, expanded_token
                         )
                 elif _t.name in self.zero_defs:
@@ -676,15 +631,15 @@ class Parser:
 
                 define = self.defs[_t.name]
                 if "#" in define.token:
-                    new_token = self._arguments_expansion(define, _t, False)
-                    new_token = self._stringify_token(new_token)
-                    expanded_token = self._argument_replacement(_t, new_token, expanded_token)
+                    new_token = _arguments_expansion(self.cdef, define, _t, False)
+                    new_token = self.cdef.stringify_token(new_token)
+                    expanded_token = _argument_replacement(_t, new_token, expanded_token)
                 else:
-                    new_token = self._arguments_expansion(define, _t, True)
+                    new_token = _arguments_expansion(self.cdef, define, _t, True)
                     token_seen.add(_t.name)
                     new_token = _expand_token(new_token, token_seen)
                     token_seen.remove(_t.name)
-                    expanded_token = self._argument_replacement(_t, new_token, expanded_token)
+                    expanded_token = _argument_replacement(_t, new_token, expanded_token)
 
             if _token != expanded_token:
                 new_tokens = set(t.name for t in self.find_tokens(expanded_token))
@@ -707,7 +662,7 @@ class Parser:
 
         with open(filepath, "r", errors="replace") as fs:
             for line, lineno in self.read_file_lines(fs, try_if_else, ignore_header_guard):
-                define = self._get_define(line, filepath, lineno)
+                define = self._do_define_directive(line, filepath, lineno)
                 if define is None:
                     continue
                 if define.params is None:
