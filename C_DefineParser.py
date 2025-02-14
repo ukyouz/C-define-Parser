@@ -75,8 +75,10 @@ compile_flag_parser = ArgumentParser()
 compile_flag_parser.add_argument("-I", "--include", action="append", nargs=1, metavar="PATH", default=[])
 
 
-REG_STATEMENT_IF = re.compile(r"\s*#\s*if(?P<DEF>(?P<NOT>n*)def)*\s*(?P<TOKEN>.+)")
-REG_STATEMENT_ELIF = re.compile(r"\s*#\s*elif\s*(?P<TOKEN>.+)")
+REG_STATEMENT_IF = re.compile(r"\s*#\s*if(\s+|\b)(?P<TOKEN>.+)")
+REG_STATEMENT_IFDEF = re.compile(r"\s*#\s*ifdef(\s+|\b)(?P<TOKEN>.+)")
+REG_STATEMENT_IFNDEF = re.compile(r"\s*#\s*ifndef(\s+|\b)(?P<TOKEN>.+)")
+REG_STATEMENT_ELIF = re.compile(r"\s*#\s*elif(\s+|\b)(?P<TOKEN>.+)")
 REG_STATEMENT_ELSE = re.compile(r"\s*#\s*else.*")
 REG_STATEMENT_ENDIF = re.compile(r"\s*#\s*endif.*")
 
@@ -132,23 +134,20 @@ class CDefineEnv:
         self._globals = {}  # use for eval
 
     def add_expr(self, code):
-        exec(code, self._globals)
+        try:
+            exec(code, self._globals)
+        except NameError:
+            pass
+        except SyntaxError:
+            pass
 
     def add_define(self, define: Define):
         if define.params is None:
             code = "%s = %s" % (define.name, convert_op_c2py(define.token))
-            try:
-                self.add_expr(code)
-            except NameError as e:
-                print(e.name)
-            except SyntaxError:
-                pass
+            self.add_expr(code)
         else:
             code = "%s = lambda %s: %s" % (define.name, ",".join(define.params), define.token)
-            try:
-                self.add_expr(code)
-            except SyntaxError:
-                pass
+            self.add_expr(code)
 
     def del_name(self, name):
         exec("del %s" % name, self._globals)
@@ -161,6 +160,19 @@ class CDefineEnv:
             return None
 
 
+def has_defined(define: Define, curr_file, curr_line):
+    defined_file = define.file
+    defined_line = define.lineno
+    if (
+        defined_file
+        and os.path.samefile(defined_file, curr_file)
+        and curr_line < defined_line
+    ):
+        return False
+    else:
+        return True
+
+
 class Parser:
     def __init__(self):
         self.reset()
@@ -170,7 +182,6 @@ class Parser:
         self.cdef = CDefineEnv()
         self.defs = {}  # dict of Define
         self.zero_defs = set()
-        self.temp_defs = defaultdict(set)  # temp definitions in filename
         self.folder = ""
         self.include_trees = defaultdict(list)  # dict[filename: str, include_files: list[str]]
         self.header_files = []
@@ -192,19 +203,6 @@ class Parser:
     def _insert_define(self, define: Define):
         self.defs[define.name] = define
         self.cdef.add_define(define)
-
-    def insert_temp_define(self, name, *, params=None, token=None, filename="", lineno=0):
-        logger.debug("insert temp define: %s", name)
-        self.temp_defs[filename].add(name)
-        self.insert_define(name, params=params, token=token, filename=filename, lineno=lineno)
-
-    def remove_temp_define(self, filename):
-        logger.debug("remove %d temp defines", len(self.temp_defs[filename]))
-        for name in self.temp_defs[filename]:
-            if name in self.defs:
-                del self.defs[name]
-                self.cdef.del_name(name)
-        self.temp_defs[filename] = set()
 
     def remove_define(self, name):
         if name in self.defs:
@@ -231,54 +229,39 @@ class Parser:
         ignore_header_guard=False,
         reserve_whitespace=False,
     ):
-        first_guard_token = True
-
         captured_ifs: list[CodeActiveState] = []
         def is_active(single_line: str = "") -> bool:
-            nonlocal first_guard_token
             if not try_if_else:
                 return True
 
             match_if = REG_STATEMENT_IF.match(single_line)
+            match_ifdef = REG_STATEMENT_IFDEF.match(single_line)
+            match_ifndef = REG_STATEMENT_IFNDEF.match(single_line)
             match_elif = REG_STATEMENT_ELIF.match(single_line)
             match_else = REG_STATEMENT_ELSE.match(single_line)
             match_endif = REG_STATEMENT_ENDIF.match(single_line)
             if match_if:
                 token = match_if.group("TOKEN")
-                if match_if.group("DEF") is not None:
-                    # #ifdef, or #ifndef, only need to check whether the definition exists
-                    if_tokens = self.find_tokens(token)
-                    if_token = if_tokens[0].name if len(if_tokens) == 1 else "<unknown>"
-                    if (
-                        ignore_header_guard
-                        and first_guard_token
-                        and (match_if.group("NOT") == "n")
-                    ):
-                        if_token_val = 0  # header guard always uses #ifndef *
-                    else:
-                        if if_token in self.defs:
-                            if not ignore_header_guard:
-                                if_token_val = 1
-                            else:
-                                defined_file = self.defs[if_token].file
-                                defined_line = self.defs[if_token].lineno
-                                if (
-                                    defined_file
-                                    and os.path.samefile(defined_file, fileio.name)
-                                    and line_no < defined_line
-                                ):
-                                    if_token_val = 0
-                                else:
-                                    if_token_val = 1
-                        else:
-                            if_token_val = 0
+                if_token = self.expand_token(token, zero_undefined=True)
+                if_token_val = self.cdef.try_eval_num(if_token)
+                captured_ifs.append(CodeActiveState(if_token_val))
+            elif match_ifdef:
+                check_name = match_ifdef.group("TOKEN").rstrip()
+                if check_name in self.defs:
+                    has_def = has_defined(self.defs[check_name], fileio.name, line_no)
                 else:
-                    if_token = self.expand_token(token, zero_undefined=True)
-                    if_token_val = bool(self.cdef.try_eval_num(if_token))
-                captured_ifs.append(CodeActiveState(if_token_val ^ (match_if.group("NOT") == "n")))
-                first_guard_token = (
-                    False if match_if.group("NOT") == "n" else first_guard_token
-                )
+                    has_def = False
+                captured_ifs.append(CodeActiveState(has_def))
+            elif match_ifndef:
+                if ignore_header_guard and captured_ifs == []:
+                    captured_ifs.append(CodeActiveState(True))
+                else:
+                    check_name = match_ifndef.group("TOKEN").rstrip()
+                    if check_name in self.defs:
+                        has_def = has_defined(self.defs[check_name], fileio.name, line_no)
+                    else:
+                        has_def = False
+                    captured_ifs.append(CodeActiveState(not has_def))
             elif match_elif:
                 if_token = self.expand_token(
                     match_elif.group("TOKEN"),
