@@ -32,7 +32,7 @@ def test_token(parser_default, token, expected_value):
 ])
 def test_define(parser_default, define, expected_value):
 	define = parser_default.get_expand_define(define)
-	value = parser_default.try_eval_num(define.token)
+	value = parser_default.cdef.try_eval_num(define.token)
 	assert value == expected_value
 
 ################################################################################
@@ -66,7 +66,7 @@ def test_token_pub(parser_public, token, expected_value):
 ])
 def test_define_pub(parser_public, define, expected_value):
 	define = parser_public.get_expand_define(define)
-	value = parser_public.try_eval_num(define.token)
+	value = parser_public.cdef.try_eval_num(define.token)
 	assert value == expected_value
 
 def test_stacks_pub(parser_public):
@@ -85,7 +85,7 @@ def test_stacks_pub(parser_public):
 
 def test_existence_pub(parser_public):
 	define = parser_public.get_expand_define('BUFFER_1_BASE')
-	assert define == None
+	assert define is None
 
 ################################################################################
 
@@ -133,7 +133,7 @@ def test_stacks_test(parser_test):
 ])
 def test_define_test(parser_test, define, expected_value):
 	define = parser_test.get_expand_define(define)
-	value = parser_test.try_eval_num(define.token)
+	value = parser_test.cdef.try_eval_num(define.token)
 	assert value == expected_value
 
 def test_existence_test(parser_test):

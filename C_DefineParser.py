@@ -10,9 +10,9 @@ from collections import Counter, defaultdict, namedtuple
 from contextlib import contextmanager
 from pathlib import Path
 from pprint import pformat
-from typing import List, NamedTuple, Iterable
+from typing import List, NamedTuple
 
-from utils.txt_op import remove_comment
+from utils.txt_op import remove_comment, convert_op_c2py
 
 
 Define = namedtuple(
@@ -32,8 +32,6 @@ REGEX_DEFINE = re.compile(
 REGEX_UNDEF = re.compile(r"#\s*undef\s+" + REGEX_TOKEN.pattern)
 REGEX_INCLUDE = re.compile(r'#\s*include\s+["<](?P<PATH>.+)[">]\s*')
 REGEX_STRING = re.compile(r'"[^"]+"')
-REGEX_OPERATOR_NOT = re.compile("!(?!=)")
-BIT = lambda n: 1 << n
 
 logger = logging.getLogger(os.path.basename(__name__))
 
@@ -76,27 +74,6 @@ def git_lsfiles(directory, exts=[".h", ".H"]):
 compile_flag_parser = ArgumentParser()
 compile_flag_parser.add_argument("-I", "--include", action="append", nargs=1, metavar="PATH", default=[])
 
-
-REG_LITERALS = [
-    re.compile(r"\b(?P<NUM>[0-9]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-    re.compile(r"\b(?P<NUM>0b[01]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-    re.compile(r"\b(?P<NUM>0[0-7]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-    re.compile(r"\b(?P<NUM>0x[0-9a-f]+)(?:##)?([ul]|ull?|ll?u|ll)\b", re.IGNORECASE),
-]
-
-REG_SPECIAL_SIZEOFTYPES = [
-    re.compile(r"sizeof\(\s*U8\s*\)"),
-    re.compile(r"sizeof\(\s*U16\s*\)"),
-    re.compile(r"sizeof\(\s*U32\s*\)"),
-    re.compile(r"sizeof\(\s*U64\s*\)"),
-]
-
-REG_SPECIAL_TYPES = [
-    re.compile(r"\(\s*U8\s*\)"),
-    re.compile(r"\(\s*U16\s*\)"),
-    re.compile(r"\(\s*U32\s*\)"),
-    re.compile(r"\(\s*U64\s*\)"),
-]
 
 REG_STATEMENT_IF = re.compile(r"\s*#\s*if(?P<DEF>(?P<NOT>n*)def)*\s*(?P<TOKEN>.+)")
 REG_STATEMENT_ELIF = re.compile(r"\s*#\s*elif\s*(?P<TOKEN>.+)")
@@ -150,12 +127,47 @@ class CodeActiveState:
         self._active = not self._active
 
 
+class CDefineEnv:
+    def __init__(self):
+        self._globals = {}  # use for eval
+
+    def add_expr(self, code):
+        exec(code, self._globals)
+
+    def add_define(self, define: Define):
+        if define.params is None:
+            code = "%s = %s" % (define.name, convert_op_c2py(define.token))
+            try:
+                self.add_expr(code)
+            except NameError as e:
+                print(e.name)
+            except SyntaxError:
+                pass
+        else:
+            code = "%s = lambda %s: %s" % (define.name, ",".join(define.params), define.token)
+            try:
+                self.add_expr(code)
+            except SyntaxError:
+                pass
+
+    def del_name(self, name):
+        exec("del %s" % name, self._globals)
+
+    def try_eval_num(self, token):
+        token = convert_op_c2py(token)
+        try:
+            return int(eval(token, self._globals))
+        except:
+            return None
+
+
 class Parser:
     def __init__(self):
         self.reset()
         self.filelines = defaultdict(list)
 
     def reset(self):
+        self.cdef = CDefineEnv()
         self.defs = {}  # dict of Define
         self.zero_defs = set()
         self.temp_defs = defaultdict(set)  # temp definitions in filename
@@ -167,7 +179,7 @@ class Parser:
         """params: list of parameters required, token: define body"""
         new_params = params or []
         new_token = token or ""
-        self.defs[name] = Define(
+        define = Define(
             name=name,
             params=new_params,
             token=new_token,
@@ -175,6 +187,11 @@ class Parser:
             file=filename,
             lineno=lineno,
         )
+        self._insert_define(define)
+
+    def _insert_define(self, define: Define):
+        self.defs[define.name] = define
+        self.cdef.add_define(define)
 
     def insert_temp_define(self, name, *, params=None, token=None, filename="", lineno=0):
         logger.debug("insert temp define: %s", name)
@@ -186,13 +203,16 @@ class Parser:
         for name in self.temp_defs[filename]:
             if name in self.defs:
                 del self.defs[name]
+                self.cdef.del_name(name)
         self.temp_defs[filename] = set()
 
     def remove_define(self, name):
         if name in self.defs:
             del self.defs[name]
+            self.cdef.del_name(name)
         elif name in self.zero_defs:
             self.zero_defs.remove(name)
+            self.cdef.del_name(name)
         else:
             raise KeyError("token '{}' is not defined!".format(name))
 
@@ -203,32 +223,6 @@ class Parser:
         else:
             token = token.strip()
         return token
-
-    def try_eval_num(self, token):
-        # remove integer literals type hint
-        for re_reg in REG_LITERALS:
-            token = re_reg.sub(r"\1", token)
-        # calculate size of special type
-        # transform type cascading to bit mask for equivalence calculation
-        for data_sz, reg_sizeof_type, reg_special_type in zip(
-            [1, 2, 4, 8], REG_SPECIAL_SIZEOFTYPES, REG_SPECIAL_TYPES
-        ):
-            # limitation:
-            #   for equation like (U32)1 << (U32)(15) may be calculated to wrong value
-            #   due to operator order
-            # sizeof(U16) -> 2
-            token = reg_sizeof_type.sub(str(data_sz), token)
-            # (U16)x -> 0xFFFF & x
-            token = reg_special_type.sub("0x%s & " % ("F" * data_sz * 2), token)
-        # syntax translation from C -> Python
-        token = token.replace("/", "//")
-        token = token.replace("&&", " and ")
-        token = token.replace("||", " or ")
-        token = REGEX_OPERATOR_NOT.sub(" not ", token)
-        try:
-            return int(eval(token))
-        except:
-            return None
 
     def read_file_lines(
         self,
@@ -280,7 +274,7 @@ class Parser:
                             if_token_val = 0
                 else:
                     if_token = self.expand_token(token, zero_undefined=True)
-                    if_token_val = bool(self.try_eval_num(if_token))
+                    if_token_val = bool(self.cdef.try_eval_num(if_token))
                 captured_ifs.append(CodeActiveState(if_token_val ^ (match_if.group("NOT") == "n")))
                 first_guard_token = (
                     False if match_if.group("NOT") == "n" else first_guard_token
@@ -290,7 +284,7 @@ class Parser:
                     match_elif.group("TOKEN"),
                     zero_undefined=True,
                 )
-                captured_ifs[-1].meet_elif(self.try_eval_num(if_token))
+                captured_ifs[-1].meet_elif(self.cdef.try_eval_num(if_token))
             elif match_else:
                 captured_ifs[-1].meet_else()
             elif match_endif:
@@ -331,6 +325,7 @@ class Parser:
             name = match.group("NAME")
             if name in self.defs:
                 del self.defs[name]
+                self.cdef.del_name(name)
             return
 
         match = REGEX_DEFINE.match(line)
@@ -418,7 +413,7 @@ class Parser:
                         define = self._get_define(line, filepath, lineno)
                         if define is None or define.name in pre_defined_keys:
                             continue
-                        self.defs[define.name] = define
+                        self._insert_define(define)
 
             except UnicodeDecodeError as e:
                 logger.warning("Fail to open {!r}. {}".format(filepath, e))
@@ -439,15 +434,15 @@ class Parser:
                         continue
                     # if len(define.params):
                     #     return
-                    self.defs[define.name] = define
+                    self._insert_define(define)
         except UnicodeDecodeError as e:
             print(f"Fail to open :{filepath}. {e}")
 
     @contextmanager
     def read_c(self, filepath, try_if_else=False):
         """use `with` context manager for having temporary tokens defined in .c source file"""
-        temp_defs = {}  # use dict to uniqify define name
-        temp_overwrite = {}
+        temp_defs = []
+        temp_hidden = []
         try:
             add_includes = Path(filepath).resolve() not in self.include_trees
             with open(filepath, "r", errors="replace") as fs:
@@ -469,28 +464,23 @@ class Parser:
                     # if len(define.params):
                     #     return
                     if define.name in self.defs:
-                        temp_overwrite[define.name] = self.defs[define.name]
-                    temp_defs[define.name] = define
+                        temp_hidden.append(self.defs[define.name])
+                    temp_defs.append(define)
 
-            for define in temp_defs.values():
-                self.insert_define(
-                    name=define.name,
-                    params=define.params,
-                    token=define.token,
-                    filename=define.file,
-                    lineno=define.lineno,
-                )
+            for define in temp_defs:
+                self._insert_define(define)
 
             yield
 
         except UnicodeDecodeError as e:
             print(f"Fail to open :{filepath}. {e}")
         finally:
-            for define in temp_defs.values():
+            for define in temp_defs:
                 del self.defs[define.name]
-            # restore temp overwrite
-            for name, define in temp_overwrite.items():
-                self.defs[name] = define
+                self.cdef.del_name(define.name)
+            # restore temp hidden
+            for define in temp_hidden:
+                self._insert_define(define)
 
     def load_compile_flags(self, compile_flag_txt: str=""):
         if compile_flag_txt == "":
@@ -627,7 +617,7 @@ class Parser:
                 )
 
         new_token = re.sub(r"\s*##\s*", "", new_token)
-        if new_token_val := self.try_eval_num(new_token):
+        if new_token_val := self.cdef.try_eval_num(new_token):
             return str(new_token_val)
         else:
             return new_token
@@ -654,6 +644,10 @@ class Parser:
         return expanded_token
 
     def expand_token(self, token: str, zero_undefined=False):
+
+        token_val = self.cdef.try_eval_num(token)
+        if token_val is not None:
+            return str(token_val)
 
         total_seen = set()
 
@@ -686,6 +680,7 @@ class Parser:
                     expanded_token = re.sub(WORD_BOUNDARY(_t.name), "0", expanded_token)
                 elif _t.line == _t.name and zero_undefined:
                     self.zero_defs.add(_t.name)
+                    self.cdef.add_expr("%s = 0" % _t.name)
                     expanded_token = re.sub(WORD_BOUNDARY(_t.name), "0", expanded_token)
 
             parameterized_tokens = [t for t in self.find_tokens(expanded_token) if t.params]
@@ -714,9 +709,9 @@ class Parser:
                 if len(new_tokens):
                     expanded_token = _expand_token(expanded_token, token_seen)
 
-            token_val = self.try_eval_num(expanded_token)
-            if token_val is not None:
-                return str(token_val)
+            # token_val = self.cdef.try_eval_num(expanded_token)
+            # if token_val is not None:
+            #     return str(token_val)
 
             return expanded_token
 
@@ -730,25 +725,17 @@ class Parser:
         with open(filepath, "r", errors="replace") as fs:
             for line, lineno in self.read_file_lines(fs, try_if_else, ignore_header_guard):
                 define = self._get_define(line, filepath, lineno)
-                if define == None:
+                if define is None:
                     continue
                 if define.params is None:
-                    token = self.expand_token(define.token)
+                    expanded_token = self.expand_token(define.token)
                 else:
-                    token = define.token
-                if define.name in self.defs:
-                    token_val = self.try_eval_num(token)
-                    if token_val is not None:
-                        self.defs[define.name] = self.defs[define.name]._replace(
-                            token=str(token_val)
-                        )
-                elif define.name in self.zero_defs:
-                    token_val = "0"
+                    expanded_token = define.token
                 defines.append(
                     Define(
                         name=define.name,
                         params=define.params,
-                        token=token,
+                        token=expanded_token,
                         line=line,
                         file=filepath,
                         lineno=lineno,
@@ -756,7 +743,7 @@ class Parser:
                 )
         return defines
 
-    def get_expand_define(self, macro_name):
+    def get_expand_define(self, macro_name) -> Define | None:
         if macro_name not in self.defs:
             return None
 
@@ -790,13 +777,10 @@ class Parser:
 
 if __name__ == "__main__":
     p = Parser()
-    with open("samples/base/conf.h", "r") as fs:
-        for line, lineno in p.read_file_lines(fs):
-            print(f"{lineno:3} {line}")
-    # p.read_folder_h("./samples")
+    p.read_folder_h("./samples")
 
-    # defines = p.get_expand_defines("./samples/address_map.h", try_if_else=True)
-    # for define in defines:
-    #     val = p.try_eval_num(define.token)
-    #     token = hex(val) if val and val > 0x08000 else define.token
-    #     print(f"{define.name:25} {token}")
+    defines = p.get_expand_defines("./samples/address_map.h", try_if_else=True)
+    for define in defines:
+        val = p.cdef.try_eval_num(define.token)
+        token = hex(val) if val and val > 0x08000 else define.token
+        print(f"{define.name:25} {token}")
