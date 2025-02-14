@@ -127,6 +127,25 @@ class IncludeHeader(NamedTuple):
     src_file: Path
 
 
+class CodeActiveState:
+    """active state of a code region inside #if/... directives"""
+
+    def __init__(self, condition):
+        self._active = bool(condition)
+
+    def __bool__(self) -> bool:
+        return self._active
+
+    def meet_elif(self, condition):
+        if self._active:
+            self._active = False
+        else:
+            self._active = bool(condition)
+
+    def meet_else(self):
+        self._active = not self._active
+
+
 class Parser:
     def __init__(self):
         self.reset()
@@ -216,15 +235,77 @@ class Parser:
         reserve_whitespace=False,
         include_block_comment=False,
     ):
-        if_depth = 0
-        if_true_bmp = 1  # bitmap for every #if statement
-        if_done_bmp = 1  # bitmap for every #if statement
         first_guard_token = True
         is_block_comment = False
-        # with open(filepath, "r", errors="replace") as fs:
         multi_lines = ""
 
-        captured_ifs = []
+        captured_ifs: list[CodeActiveState] = []
+        def is_active(single_line: str = "") -> bool:
+            nonlocal first_guard_token
+            if not try_if_else:
+                return True
+
+            match_if = REG_STATEMENT_IF.match(single_line)
+            match_elif = REG_STATEMENT_ELIF.match(single_line)
+            match_else = REG_STATEMENT_ELSE.match(single_line)
+            match_endif = REG_STATEMENT_ENDIF.match(single_line)
+            if match_if:
+                token = match_if.group("TOKEN")
+                if match_if.group("DEF") is not None:
+                    # #ifdef, or #ifndef, only need to check whether the definition exists
+                    if_tokens = self.find_tokens(token)
+                    if_token = if_tokens[0].name if len(if_tokens) == 1 else "<unknown>"
+                    if (
+                        ignore_header_guard
+                        and first_guard_token
+                        and (match_if.group("NOT") == "n")
+                    ):
+                        if_token_val = 0  # header guard always uses #ifndef *
+                    else:
+                        if if_token in self.defs:
+                            if not ignore_header_guard:
+                                if_token_val = 1
+                            else:
+                                defined_file = self.defs[if_token].file
+                                defined_line = self.defs[if_token].lineno
+                                if (
+                                    defined_file
+                                    and os.path.samefile(defined_file, fileio.name)
+                                    and line_no < defined_line
+                                ):
+                                    if_token_val = 0
+                                else:
+                                    if_token_val = 1
+                        else:
+                            if_token_val = 0
+                else:
+                    if_token = self.expand_token(token, zero_undefined=True)
+                    if_token_val = bool(self.try_eval_num(if_token))
+                captured_ifs.append(CodeActiveState(if_token_val ^ (match_if.group("NOT") == "n")))
+                first_guard_token = (
+                    False if match_if.group("NOT") == "n" else first_guard_token
+                )
+            elif match_elif:
+                if_token = self.expand_token(
+                    match_elif.group("TOKEN"),
+                    zero_undefined=True,
+                )
+                captured_ifs[-1].meet_elif(self.try_eval_num(if_token))
+            elif match_else:
+                captured_ifs[-1].meet_else()
+            elif match_endif:
+                if captured_ifs:
+                    captured_ifs.pop()
+                else:
+                    # some source files may tend to leave an extra #endif at the end
+                    # I think it is for unintentionally include, so just warn and let it go.
+                    logger.warning("Extra #endif found in {}#{}".format(fileio.name, line_no))
+                    return False
+            if match_if or match_elif or match_else or match_endif:
+                # let directives be active
+                return True
+            return all(bool(active) for active in captured_ifs)
+
         for line_no, line in enumerate(fileio.readlines(), 1):
 
             if not is_block_comment:
@@ -253,87 +334,13 @@ class Parser:
             )
             if REGEX_SYNTAX_LINE_BREAK.search(line):
                 if reserve_whitespace:
-                    if if_true_bmp == BIT(if_depth + 1) - 1:
+                    if is_active():
                         yield (line, line_no)
                 continue
             single_line = REGEX_SYNTAX_LINE_COMMENT.sub("", multi_lines)
             multi_lines = ""
 
-            if try_if_else:
-                match_if = REG_STATEMENT_IF.match(single_line)
-                match_elif = REG_STATEMENT_ELIF.match(single_line)
-                match_else = REG_STATEMENT_ELSE.match(single_line)
-                match_endif = REG_STATEMENT_ENDIF.match(single_line)
-                if match_if:
-                    captured_ifs.append((line_no, single_line))
-                    if_depth += 1
-                    token = match_if.group("TOKEN")
-                    if match_if.group("DEF") is not None:
-                        # #ifdef, or #ifndef, only need to check whether the definition exists
-                        if_tokens = self.find_tokens(token)
-                        if_token = if_tokens[0].name if len(if_tokens) == 1 else "<unknown>"
-                        if (
-                            ignore_header_guard
-                            and first_guard_token
-                            and (match_if.group("NOT") == "n")
-                        ):
-                            if_token_val = 0  # header guard always uses #ifndef *
-                        else:
-                            if if_token in self.defs:
-                                if not ignore_header_guard:
-                                    if_token_val = 1
-                                else:
-                                    defined_file = self.defs[if_token].file
-                                    defined_line = self.defs[if_token].lineno
-                                    if (
-                                        defined_file
-                                        and os.path.samefile(defined_file, fileio.name)
-                                        and line_no < defined_line
-                                    ):
-                                        if_token_val = 0
-                                    else:
-                                        if_token_val = 1
-                            else:
-                                if_token_val = 0
-                    else:
-                        if_token = self.expand_token(token, zero_undefined=True)
-                        if_token_val = bool(self.try_eval_num(if_token))
-                    if_true_bmp |= BIT(if_depth) * (
-                        if_token_val ^ (match_if.group("NOT") == "n")
-                    )
-                    first_guard_token = (
-                        False if match_if.group("NOT") == "n" else first_guard_token
-                    )
-                elif match_elif:
-                    captured_ifs.append((line_no, single_line))
-                    if_token = self.expand_token(
-                        match_elif.group("TOKEN"),
-                        zero_undefined=True,
-                    )
-                    if_token_val = bool(self.try_eval_num(if_token))
-                    if_true_bmp |= BIT(if_depth) * if_token_val
-                    if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
-                elif match_else:
-                    captured_ifs.append((line_no, single_line))
-                    if_true_bmp ^= BIT(if_depth)  # toggle state
-                    if_true_bmp &= ~(BIT(if_depth) & if_done_bmp)
-                elif match_endif:
-                    captured_ifs.append((line_no, single_line))
-                    if_true_bmp &= ~BIT(if_depth)
-                    if_done_bmp &= ~BIT(if_depth)
-                    if len(captured_ifs) > 1:
-                        assert if_depth > 0, "{}#{} #endif with less #if directive.".format(fileio.name, line_no)
-                    else:
-                        # some source files may tend to leave an extra #endif at the end
-                        # I think it is for unintentionally include, so just warn and let it go.
-                        logger.warning("Extra #endif found in {}#{}".format(fileio.name, line_no))
-                        break
-                    if_depth -= 1
-
-            if if_true_bmp == BIT(if_depth + 1) - 1:
-                yield (single_line, line_no)
-                if_done_bmp |= BIT(if_depth)
-            elif try_if_else and (match_if or match_elif or match_else or match_endif):
+            if is_active(single_line):
                 yield (single_line, line_no)
 
     def _get_define(self, line, filepath="", lineno=0):
@@ -434,8 +441,7 @@ class Parser:
             except UnicodeDecodeError as e:
                 logger.warning("Fail to open {!r}. {}".format(filepath, e))
 
-            if filepath in header_files:
-                header_done.add(filepath)
+            header_done.add(filepath)
 
         for header_file in header_files:
             read_header(header_file)
@@ -802,10 +808,13 @@ class Parser:
 
 if __name__ == "__main__":
     p = Parser()
-    p.read_folder_h("./samples")
+    with open("samples/base/conf.h", "r") as fs:
+        for line, lineno in p.read_file_lines(fs):
+            print(f"{lineno:3} {line}")
+    # p.read_folder_h("./samples")
 
-    defines = p.get_expand_defines("./samples/address_map.h", try_if_else=True)
-    for define in defines:
-        val = p.try_eval_num(define.token)
-        token = hex(val) if val and val > 0x08000 else define.token
-        print(f"{define.name:25} {token}")
+    # defines = p.get_expand_defines("./samples/address_map.h", try_if_else=True)
+    # for define in defines:
+    #     val = p.try_eval_num(define.token)
+    #     token = hex(val) if val and val > 0x08000 else define.token
+    #     print(f"{define.name:25} {token}")
