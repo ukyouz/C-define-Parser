@@ -8,6 +8,8 @@ setup(
     author='Johnny Cheng',
     author_email='zhung1206@gmail.com',
     license='MIT',
-    py_modules=['C_DefineParser'],
+    py_modules=['test'],
+    packages=['C_DefineParser', 'C_DefineParser.utils'],
+    package_dir={"": "src"},
     install_requires=[],
 )

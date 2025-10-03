@@ -1,5 +1,5 @@
 import pytest
-from C_DefineParser import remove_comment
+from C_DefineParser.utils.txt_op import remove_comment
 
 
 @pytest.mark.parametrize("src, out_expected", [

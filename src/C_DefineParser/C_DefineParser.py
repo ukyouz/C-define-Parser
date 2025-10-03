@@ -11,7 +11,7 @@ from pathlib import Path
 from pprint import pformat
 from typing import List, NamedTuple
 
-from utils.txt_op import remove_comment, convert_op_c2py, get_token_param_str, iter_arguments
+from C_DefineParser.utils.txt_op import remove_comment, convert_op_c2py, get_token_param_str, iter_arguments
 
 
 Define = namedtuple(
@@ -163,7 +163,7 @@ class CDefineEnv:
             return int(eval(token, self._globals))
         except:
             return None
-    
+
     def stringify_token(self, line: str, old_params: list = None) -> str:
         expanded_token = line
         for mark_match in REGEX_MACRO_HASH_OP.finditer(line):
@@ -385,7 +385,7 @@ class Parser:
 
             if not try_if_else or is_active(merged_line):
                 yield (merged_line, line_no)
-    
+
             merged_line = ""
 
     def _do_define_directive(self, line, filepath="", lineno=0) -> Define | None:

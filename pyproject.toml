@@ -1,0 +1,7 @@
+[project]
+name = "C_DefineParser"
+version = "0.1.1"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["C_DefineParser"]
